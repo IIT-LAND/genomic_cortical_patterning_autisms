@@ -1,0 +1,296 @@
+---
+title: "_06_psychENCODE"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(easypackages)
+libraries("here","tidyverse","acPCA","patchwork","readxl","reshape2","matrixStats")
+source(here("code","sortLvls.R"))
+source(here("code","ac_sparsePCA_gene_finder.R"))
+source(here("code","genelistOverlap.R"))
+
+get_sample_donor <- function(df2use){
+  for (id in rownames(df2use)){
+    tmp_res = strsplit(id, ".", fixed = TRUE)
+    df2use[id,"donor"] = tmp_res[[1]][1]
+    df2use[id,"sample"] = tmp_res[[1]][2] 
+  }
+  df2use$donor = factor(df2use$donor)
+  df2use$sample = factor(df2use$sample)
+  return(df2use)
+}
+
+plotdir = here("plots")
+resultdir = here("results")
+
+datadir = "/Users/mlombardo/Dropbox/data/DevelopmentalPsychENCODE/mRNA-seq"
+meta_data = read_excel(file.path(datadir,"mRNA-seq_Sample metadata.xlsx"))
+gex_data = read.delim(file.path(datadir,"mRNA-seq_hg38.gencode21.wholeGene.geneComposite.STAR.nochrM.gene.RPKM.normalized.CQNCombat.txt"))
+gex_cols = colnames(gex_data)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# grab cortex data
+regions2use = c("MFC","OFC","DFC","VFC","M1C","S1C","IPC","A1C","STC","ITC","V1C")
+window1 = c("HSB112","HSB148")
+window2 = c("HSB153","HSB150","HSB113","HSB103","HSB149","HSB114")
+window3 = c("HSB178","HSB154","HSB96","HSB97")
+window4 = c("HSB98","HSB107","HSB92","HSB159")
+window5 = c("HSB155","HSB194","HSB121","HSB132","HSB139")
+window6 = c("HSB131","HSB171","HSB122","HSB143","HSB173")
+window7 = c("HSB172","HSB118","HSB141","HSB174","HSB175")
+window8 = c("HSB124","HSB119","HSB105","HSB127")
+window9 = c("HSB130","HSB136","HSB126","HSB145","HSB123","HSB135")
+windows2use = c(window2, window3, window4,window5,window6,window7,window8,window9)
+
+cols2use = character(length = 0)
+for (id in windows2use){
+  for (region in regions2use){
+    cols2use = c(cols2use, sprintf("%s.%s",id,region))
+  }
+}
+cols2use = cols2use[is.element(cols2use,colnames(gex_data))]
+gex_data_sub = gex_data[,c("ensembl_id","gene_symbol",cols2use)]
+
+# filter out genes with log2(RPKM) below median of 2
+gene_medians = rowMedians(as.matrix(gex_data_sub[,3:ncol(gex_data_sub)]))
+gene_mask = gene_medians>2
+gex_data_sub = gex_data_sub[gene_mask,]
+
+# plot data
+x = melt(gex_data_sub,id.vars=c("ensembl_id","gene_symbol"))
+# colnames(x) = c('gene_id', 'sample', 'value')
+p = ggplot(x, aes(x=value, color=variable)) + geom_density() + guides(colour = FALSE)
+p = p + scale_x_continuous(limits=c(0,70)) + xlab("log2(RPKM)") 
+p
+```
+
+Windows 2+3+4 (Prenatal) test out AC-PCA compared to regular PCA to see if this reveals gradients.
+
+```{r, warning=FALSE, message=FALSE}
+windows2use = c(window2,window3,window4)
+cols2use = character(length = 0)
+for (id in windows2use){
+  for (region in regions2use){
+    cols2use = c(cols2use, sprintf("%s.%s",id,region))
+  }
+}
+cols2use = cols2use[is.element(cols2use,colnames(gex_data))]
+window_data = gex_data_sub[,c("ensembl_id","gene_symbol",cols2use)]
+
+data2use = window_data[,3:ncol(window_data)]
+rownames(data2use) = window_data$ensembl_id
+
+pca <- prcomp(t(data2use), center=T) ###regular PCA
+data2plot = as.data.frame(pca$x)
+data2plot = get_sample_donor(data2plot)
+
+X = t(data2use)
+Y = model.matrix(~0+as.factor(donor), data = data2plot) 
+result_tune <- acPCAtuneLambda(X=X, Y=Y, nPC=2, lambdas=seq(0, 10, 0.05),
+                               anov=T, kernel = "linear", quiet=T)
+
+result <- acPCA(X=X, Y=Y, lambda=result_tune$best_lambda,kernel="linear", nPC=2)
+data2plot$newPC1 = result$Xv[,1]
+data2plot$newPC2 = result$Xv[,2]
+
+data2plot$new_sample = sortLvlsByVar.fnc(data2plot$sample, data2plot$newPC1)
+
+#------------------------------------------------------------------------------
+# make plots of A-P and D-V gradients on the PCs from acPCA
+APregion_order = c("DFC","OFC","MFC","VFC","M1C","S1C","ITC","A1C","STC","IPC","V1C")
+VDregion_order = rev(c("ITC","OFC","V1C","STC","MFC","A1C","VFC","IPC","DFC","M1C","S1C"))
+APorder = c(1:length(APregion_order))
+for (ireg in 1:length(APregion_order)){
+  mask = data2plot$new_sample==APregion_order[ireg]
+  data2plot$APorder[mask] = APorder[ireg]
+  mask = data2plot$new_sample==VDregion_order[ireg]
+  data2plot$DVorder[mask] = APorder[ireg]
+}
+
+dotSize = 6
+fontSize = 15
+
+# A-P gradient with PC1
+p = ggplot(data = data2plot, aes(x = APorder, y = newPC1, label=new_sample))
+p = p + geom_text(size=dotSize, aes(colour=new_sample)) + geom_smooth(method=lm, colour="black")
+p = p + xlab("A-P order") + ylab("PC1") + ggtitle("A-P Gradient PC1") +
+  guides(colour=FALSE) + xlim(0,length(APorder)) +
+  scale_x_continuous(breaks=seq(1,length(APorder),1)) + 
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"prenatal_window234_APgradient_PC1.pdf"))
+p
+
+cor.test(data2plot$APorder,data2plot$newPC1)
+
+# D-V gradient with PC2
+p = ggplot(data = data2plot, aes(x = DVorder, y = newPC2, label=new_sample))
+p = p + geom_text(size=dotSize, aes(colour=new_sample)) + geom_smooth(method=lm, colour="black")
+p = p + xlab("D-V order") + ylab("PC2") + ggtitle("D-V Gradient PC2") +
+  guides(colour=FALSE) + xlim(0,length(APorder)) +
+  scale_x_continuous(breaks=seq(1,length(APorder),1)) + 
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"prenatal_window234_DVgradient_PC2.pdf"))
+p
+
+cor.test(data2plot$DVorder,data2plot$newPC2)
+
+#------------------------------------------------------------------------------
+
+FIND_GENES = TRUE
+if (FIND_GENES){
+  # find relevant genes
+  gene_mask = ac_sparsePCA_gene_finder(X=X, Y=Y, PCnum=1)
+  genes2use = as.character(gex_data_sub[gene_mask[,1],"gene_symbol"])
+  write(genes2use, file = file.path(resultdir,"W234genes_PC1.txt"))
+  
+  gene_mask = ac_sparsePCA_gene_finder(X=X, Y=Y, PCnum=2)
+  genes2use = as.character(gex_data_sub[gene_mask[,1],"gene_symbol"])
+  write(genes2use, file = file.path(resultdir,"W234genes_PC2.txt"))
+}
+
+# make plots of PC1 by PC2
+p1 = ggplot(data=data2plot, aes(x = PC1, y = PC2, label = new_sample, colour = new_sample)) +
+  geom_text(size=dotSize) + guides(colour = FALSE) +
+  ggtitle("Prenatal Windows 2-4 Vanilla PCA") + 
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"prenatal_windows234_vanillaPCA.pdf"))
+p1
+
+p2 = ggplot(data=data2plot, aes(x = newPC1, y = newPC2, label = new_sample, colour = new_sample)) + geom_text(size=dotSize) + guides(colour = FALSE) + xlab("PC1") + ylab("PC2") +
+  ggtitle("Prenatal Windows 2-4 PCA") + 
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"prenatal_windows234_acPCA.pdf"))
+p2
+
+p_final = p1 + p2 + plot_layout(nrow = 1, ncol = 2)
+p_final
+```
+
+```{r, warning=FALSE, message=FALSE}
+fontSize = 30
+load(here("data","tidy","enrichment_data2.Rdata"))
+
+wgcna_res = read.csv(here("WGCNAresults","wgcna_results_summary.csv"))
+backgroundTotal = dim(wgcna_res)[1]
+bglist = wgcna_res$geneSymbol
+
+sa_lv1_nzgenes = as.character(read.delim(here("data","tidy","nonzeromod_genes_SA_LV1.txt"), header = FALSE)$V1)
+ct_lv1_nzgenes = as.character(read.delim(here("data","tidy","nonzeromod_genes_CT_LV1.txt"), header = FALSE)$V1)
+ct_lv2_nzgenes = as.character(read.delim(here("data","tidy","nonzeromod_genes_CT_LV2.txt"), header = FALSE)$V1)
+
+sa_lv1_zgenes = as.character(read.delim(here("data","tidy","zeromod_genes_SA_LV1.txt"), header = FALSE)$V1)
+ct_lv1_zgenes = as.character(read.delim(here("data","tidy","zeromod_genes_CT_LV1.txt"), header = FALSE)$V1)
+ct_lv2_zgenes = as.character(read.delim(here("data","tidy","zeromod_genes_CT_LV2.txt"), header = FALSE)$V1)
+
+rownames2use = c("SA_LV1_NonZero","CT_LV1_NonZero","CT_LV2_NonZero","SA_LV1_Zero","CT_LV1_Zero","CT_LV2_Zero")
+colnames2use = c("OR","pval","log10.pval","PCnum","feature","lv","comp","list")
+feature_names = c("SA","CT","CT","SA","CT","CT")
+lv_names = c("LV1","LV1","LV2","LV1","LV1","LV2")
+comp_name = c("SA LV1","CT LV1","CT LV2")
+list_type = c("Non-Zero","Non-Zero","Non-Zero","Zero","Zero","Zero")
+
+res_mat = data.frame(matrix(nrow = length(rownames2use), ncol=length(colnames2use)))
+rownames(res_mat) = rownames2use
+colnames(res_mat) = colnames2use
+res_mat$feature = feature_names
+res_mat$lv = lv_names
+res_mat$comp = comp_name
+res_mat$list = list_type
+
+pc_genelists = list(pc1 = W234_PC1, pc2 = W234_PC2)
+pls_genelists = list(SA_LV1_NonZero = sa_lv1_nzgenes, 
+                     CT_LV1_NonZero = ct_lv1_nzgenes, 
+                     CT_LV2_NonZero = ct_lv2_nzgenes, 
+                     SA_LV1_Zero = sa_lv1_zgenes, 
+                     CT_LV1_Zero = ct_lv1_zgenes, 
+                     CT_LV2_Zero = ct_lv2_zgenes)
+
+for (i in 1:length(pls_genelists)){
+  
+  # intersect with background list
+  genes2 = pc_genelists[[1]]
+  mask = is.element(genes2,bglist)
+  genes2 = data.frame(genes2[mask])
+
+  genelist2use = data.frame(pls_genelists[[rownames2use[i]]])
+  
+  overlap_res = genelistOverlap(genelist2use,
+                                genes2,
+                                backgroundTotal,
+                                print_result = FALSE,
+                                header = FALSE)
+  res_mat[rownames2use[i],"OR"] = overlap_res[[1]]$OR
+  res_mat[rownames2use[i],"pval"] = overlap_res[[1]]$hypergeo_p
+  res_mat[rownames2use[i],"log10.pval"] = -log10(overlap_res[[1]]$hypergeo_p)
+  res_mat[i,"PCnum"] = "PC1"
+}
+
+final_mat = res_mat
+
+res_mat = data.frame(matrix(nrow = length(rownames2use), ncol=length(colnames2use)))
+rownames(res_mat) = rownames2use
+colnames(res_mat) = colnames2use
+res_mat$feature = feature_names
+res_mat$lv = lv_names
+res_mat$comp = comp_name
+res_mat$list = list_type
+
+for (i in 1:length(pls_genelists)){
+  
+  # intersect with background list
+  genes2 = pc_genelists[[2]]
+  mask = is.element(genes2,bglist)
+  genes2 = data.frame(genes2[mask])
+
+  genelist2use = data.frame(pls_genelists[[rownames2use[i]]])
+
+  overlap_res = genelistOverlap(genelist2use,
+                                genes2,
+                                backgroundTotal,
+                                print_result = FALSE,
+                                header = FALSE)
+  res_mat[rownames2use[i],"OR"] = overlap_res[[1]]$OR
+  res_mat[rownames2use[i],"pval"] = overlap_res[[1]]$hypergeo_p
+  res_mat[rownames2use[i],"log10.pval"] = -log10(overlap_res[[1]]$hypergeo_p)
+  res_mat[i,"PCnum"] = "PC2"
+}
+
+final_mat = rbind(final_mat, res_mat)
+final_mat$PCnum = factor(final_mat$PCnum)
+final_mat$feature = factor(final_mat$feature)
+final_mat$lv = factor(final_mat$lv)
+final_mat$comp = factor(final_mat$comp, levels = c("SA LV1","CT LV1","CT LV2"))
+final_mat$list = factor(final_mat$list)
+final_mat
+
+p = ggplot(data = final_mat, aes(x=list, y=log10.pval)) + facet_grid(PCnum ~ comp)
+p = p + geom_bar(aes(fill=OR), stat="identity",colour="black") + 
+  xlab("Module Type") + ylab("-log10(p)") +
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100)) +
+  geom_hline(yintercept = -log10(0.001), linetype = "dashed") +
+  guides(fill=guide_colourbar(nbin=100)) +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"prenatalGradient_enrichmentPLSmods.pdf"), width = 14, height=7)
+p
+```
