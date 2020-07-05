@@ -1,6 +1,6 @@
 # Analysis code for paper on genomic cortical patterning in autism early language outcome subtypes
 
-This repository has all the code for analyses conducted on Lombardo et al., Atypical genomic patterning of the cerebral cortex in autism with poor early language outcome.
+This repository has all the code for analyses conducted in `Lombardo et al., Atypical genomic patterning of the cerebral cortex in autism with poor early language outcome.`
 
 All analysis is primarily conducted within R, with the exception of the PLS analysis, which runs in MATLAB.
 
