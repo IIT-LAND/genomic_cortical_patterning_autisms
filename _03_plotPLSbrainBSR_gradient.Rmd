@@ -1,0 +1,312 @@
+---
+title: "plotPLSbrainBSR_gradient.Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Plot results of PLS analyses 
+
+```{r, warning=FALSE, message=FALSE}
+# libraries
+library(easypackages)
+libraries("here","ggplot2","patchwork","ggseg","readxl","ggseg","ggsegExtra","ggsegChen","tidyverse","patchwork")
+options(stringsAsFactors = FALSE)
+
+fontSize = 20
+dotSize = 10
+
+#paths
+rootpath = "/Users/mvlombardo/Dropbox/ACE_sMRI_GEX_PLS/reproAnalysis"
+codepath = here("code")
+plspath = here("pls")
+plotdir = here("plots")
+resultpath = file.path(plspath,"results")
+plotpath = file.path(plspath,"plots")
+
+# data to load
+
+# brain bootstrap ratios
+bsrfile = file.path(resultpath,"plsres_all_sa_ct_GenTemp_brainBSR+gradientorder.csv")
+data2plot = read.csv(bsrfile)
+rownames(data2plot) = data2plot$brainreg
+
+
+# scatterplot with genetic gradient
+df2plot = subset(data2plot, data2plot$feature=="Surface Area")
+pg_sa1 = ggplot(data = df2plot, aes(x = gene_gradient, y = BSR_LV1, fill=gene_gradient))
+pg_sa1 = pg_sa1 + geom_point(size=dotSize, colour="black", pch=21) + 
+  geom_smooth(method=lm, colour="black") + xlim(0,12) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
+  # scale_fill_gradientn(colors = colorRampPalette(c("#1e90ff","white","#ff8d1e"))(100)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Brain Region") + 
+  ylab("Bootstrap Ratio (BSR)") + 
+  ggtitle("Genetic Similarity Gradient SA PLS LV1") +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"geneSimGradient_SA_LV1.pdf"))
+pg_sa1
+
+cor.test(df2plot$gene_gradient, df2plot$BSR_LV1)
+
+
+df2plot = subset(data2plot, data2plot$feature=="Cortical Thickness")
+pg_ct1 = ggplot(data = df2plot, aes(x = gene_gradient, y = BSR_LV1, fill=gene_gradient))
+pg_ct1 = pg_ct1 + geom_point(size=dotSize, colour="black", pch=21) + 
+  geom_smooth(method=lm, colour="black") + xlim(0,12) +
+  scale_x_continuous(breaks=seq(1,12,1)) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("#1e90ff","white","#ff8d1e"))(100)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("red","white","blue"))(100)) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") + 
+  ylab("Bootstrap Ratio (BSR)") + 
+  ggtitle("Genetic Similarity Gradient CT PLS LV1") +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"geneSimGradient_CT_LV1.pdf"))
+pg_ct1
+
+cor.test(df2plot$gene_gradient, df2plot$BSR_LV1)
+
+
+df2plot = subset(data2plot, data2plot$feature=="Cortical Thickness")
+pg_ct2 = ggplot(data = df2plot, aes(x = gene_gradient, y = BSR_LV2, fill=gene_gradient))
+pg_ct2 = pg_ct2 + geom_point(size=dotSize, colour="black", pch=21) + 
+  geom_smooth(method=lm, colour="black") + guides(colour=FALSE) + xlim(0,12) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
+  # scale_fill_gradientn(colors = colorRampPalette(c("#1e90ff","white","#ff8d1e"))(100)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("red","white","blue"))(100)) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") + 
+  ylab("Bootstrap Ratio (BSR)") + 
+  ggtitle("Genetic Similarity Gradient CT PLS LV2") +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"geneSimGradient_CT_LV2.pdf"))
+pg_ct2
+
+cor.test(df2plot$gene_gradient, df2plot$BSR_LV2)
+
+
+
+# plot with A-P or D-V cluster
+df2plot = subset(data2plot, data2plot$feature=="Surface Area")
+df2plot$cluster = factor(df2plot$cluster, levels = c("anterior","posterior"))
+pd_sa1 = ggplot(data = df2plot, aes(x = cluster, y = BSR_LV1, fill=cluster))
+pd_sa1 = pd_sa1 + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Bootstrap Ratio (BSR)") + 
+  ggtitle("Anterior-Posterior Clusters SA PLS LV1") +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"apGradient_SA_LV1.pdf"))
+pd_sa1
+
+t.test(BSR_LV1 ~ cluster, data = df2plot)
+
+df2plot = subset(data2plot, data2plot$feature=="Cortical Thickness")
+df2plot$cluster = factor(df2plot$cluster, levels = c("ventral","dorsal"))
+pd_ct1 = ggplot(data = df2plot, aes(x = cluster, y = BSR_LV1, fill=cluster))
+pd_ct1 = pd_ct1 + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  # scale_fill_manual(values = c("#ff8d1e","#1e90ff")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) + 
+  xlab("Clusters") + 
+  ylab("Bootstrap Ratio (BSR)") + 
+  ggtitle("Ventral-Dorsal Clusters CT PLS LV1") +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"dvGradient_CT_LV1.pdf"))
+pd_ct1
+
+t.test(BSR_LV1 ~ cluster, data = df2plot)
+
+df2plot = subset(data2plot, data2plot$feature=="Cortical Thickness")
+df2plot$cluster = factor(df2plot$cluster, levels = c("ventral","dorsal"))
+pd_ct2 = ggplot(data = df2plot, aes(x = cluster, y = BSR_LV2, fill=cluster))
+pd_ct2 = pd_ct2 + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#ff8d1e","#1e90ff")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Bootstrap Ratio (BSR)") + 
+  ggtitle("Ventral-Dorsal Clusters CT PLS LV2") +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir,"dvGradient_CT_LV2.pdf"))
+pd_ct2
+
+t.test(BSR_LV2 ~ cluster, data = df2plot)
+
+
+
+
+
+# Chen Surface Area
+chen_sa = ggseg(atlas = chenAr, mapping=aes(fill=region), position="stacked", colour="black") +
+  scale_fill_brain("chenAr", package = "ggsegChen") + 
+  guides(fill = FALSE) + labs(title = "Surface Area") + 
+  theme(text = element_text(size=fontSize))
+chen_sa
+
+# Chen Cortical Thickness
+chen_ct = ggseg(atlas = chenTh, mapping=aes(fill=region), position="stacked", colour="black") +
+  scale_fill_brain("chenTh", package = "ggsegChen") + 
+  guides(fill = FALSE) + labs(title = "Cortical Thickness") + 
+  theme(text = element_text(size=fontSize))
+chen_ct
+
+# genetic similarity gradients for Chen atlases
+# Chen Surface Area
+df2plot = subset(data2plot, data2plot$feature=="Surface Area")
+chen_sa2 = ggseg(.data=df2plot, atlas = chenAr, mapping=aes(fill=gene_gradient), position="stacked", colour="black") +
+  # scale_fill_brain("chenAr", package = "ggsegChen") +
+  # scale_fill_manual(values = c("blue","red")) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("#1e90ff","white","#ff8d1e"))(100)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
+  guides(fill = FALSE) + labs(title = "Surface Area") +
+  theme(text = element_text(size=fontSize))
+ggsave(filename = file.path(plotdir,"geneSimGradient_SA.pdf"))
+chen_sa2
+
+# Chen Cortical Thickness
+df2plot = subset(data2plot, data2plot$feature=="Cortical Thickness")
+chen_ct2 = ggseg(.data=df2plot, atlas = chenTh, mapping=aes(fill=gene_gradient), position="stacked", colour="black") +
+  # scale_fill_brain("chenTh", package = "ggsegChen") +
+  # scale_fill_manual(values = c("blue","red")) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("#1e90ff","white","#ff8d1e"))(100)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("red","white","blue"))(100)) +
+  guides(fill = FALSE) + labs(title = "Cortical Thickness") +
+  theme(text = element_text(size=fontSize))
+ggsave(filename = file.path(plotdir,"geneSimGradient_CT.pdf"))
+chen_ct2
+
+
+# 2 cluster partitions for Chen atlases
+# Chen Surface Area
+df2plot = subset(data2plot, data2plot$feature=="Surface Area")
+chen_sa3 = ggseg(.data=df2plot, atlas = chenAr, mapping=aes(fill=cluster), position="stacked", colour="black") +
+  # scale_fill_brain("chenAr", package = "ggsegChen") +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("blue","red")) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
+  guides(fill = FALSE) + labs(title = "Surface Area") +
+  theme(text = element_text(size=fontSize))
+ggsave(filename = file.path(plotdir,"apGradient_SA.pdf"))
+chen_sa3
+
+# Chen Cortical Thickness
+df2plot = subset(data2plot, data2plot$feature=="Cortical Thickness")
+chen_ct3 = ggseg(.data=df2plot, atlas = chenTh, mapping=aes(fill=cluster), position="stacked", colour="black") +
+  # scale_fill_brain("chenTh", package = "ggsegChen") +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("red","blue")) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
+  guides(fill = FALSE) + labs(title = "Cortical Thickness") +
+  theme(text = element_text(size=fontSize))
+ggsave(filename = file.path(plotdir,"dvGradient_CT.pdf"))
+chen_ct3
+
+
+# Surface Area LV1
+df4plot = subset(data2plot,data2plot$feature=="Surface Area" & data2plot$hemisphere=="LH")
+p_sal = ggseg(.data = df4plot, 
+                atlas = chenAr, 
+                mapping=aes(fill=BSR_LV1), 
+                position="stacked", 
+                colour="black",
+                hemisphere = "left") + 
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-20,20)) +
+  guides(fill = guide_colourbar(nbin = 100)) + labs(title = "Surface Area LV1") + 
+  theme(text = element_text(size=fontSize))
+
+df4plot = subset(data2plot,data2plot$feature=="Surface Area" & data2plot$hemisphere=="RH")
+p_sar = ggseg(.data = df4plot, 
+                atlas = chenAr, 
+                mapping=aes(fill=BSR_LV1), 
+                position="stacked", 
+                colour="black",
+                hemisphere = "right") + 
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-20,20)) +
+  guides(fill = guide_colourbar(nbin = 100)) + labs(title = "Surface Area LV1") + 
+  theme(text = element_text(size=fontSize))
+
+p_sa = (p_sar)/(p_sal)
+p_sa
+
+
+# Cortical Thickness LV1
+df4plot = subset(data2plot,data2plot$feature=="Cortical Thickness" & data2plot$hemisphere=="LH")
+p_ctl = ggseg(.data = df4plot, 
+                atlas = chenTh, 
+                mapping=aes(fill=BSR_LV1), 
+                position="stacked", 
+                colour="black",
+                hemisphere = "left") + 
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-20,20)) +
+  guides(fill = guide_colourbar(nbin = 100)) + labs(title = "Cortical Thickness LV1") + 
+  theme(text = element_text(size=fontSize))
+
+df4plot = subset(data2plot,data2plot$feature=="Cortical Thickness" & data2plot$hemisphere=="RH")
+p_ctr = ggseg(.data = df4plot, 
+                atlas = chenTh, 
+                mapping=aes(fill=BSR_LV1), 
+                position="stacked", 
+                colour="black",
+                hemisphere = "right") + 
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-20,20)) +
+  guides(fill = guide_colourbar(nbin = 100)) + labs(title = "Cortical Thickness LV1") + 
+  theme(text = element_text(size=fontSize))
+
+p_ct = (p_ctr)/(p_ctl)
+p_ct
+
+
+# Cortical Thickness LV2
+df4plot = subset(data2plot,data2plot$feature=="Cortical Thickness" & data2plot$hemisphere=="LH")
+p_ctl = ggseg(.data = df4plot, 
+                atlas = chenTh, 
+                mapping=aes(fill=BSR_LV2), 
+                position="stacked", 
+                colour="black",
+                hemisphere = "left") + 
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-25,25)) +
+  guides(fill = guide_colourbar(nbin = 100)) + labs(title = "Cortical Thickness LV2") + 
+  theme(text = element_text(size=fontSize))
+
+df4plot = subset(data2plot,data2plot$feature=="Cortical Thickness" & data2plot$hemisphere=="RH")
+p_ctr = ggseg(.data = df4plot, 
+                atlas = chenTh, 
+                mapping=aes(fill=BSR_LV2), 
+                position="stacked", 
+                colour="black",
+                hemisphere = "right") + 
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-25,25)) +
+  guides(fill = guide_colourbar(nbin = 100)) + labs(title = "Cortical Thickness LV2") + 
+  theme(text = element_text(size=fontSize))
+
+p_ct = (p_ctr)/(p_ctl)
+p_ct
+```

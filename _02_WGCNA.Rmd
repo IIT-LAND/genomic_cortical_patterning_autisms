@@ -1,0 +1,576 @@
+---
+title: "WGCNA Analyses"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Run WGCNA
+
+## Setup and read in data
+```{r, warning=FALSE, message=FALSE}
+# Libraries
+library(easypackages)
+libraries("WGCNA","gplots","here","ggplot2")
+
+# Allow multi-threading within WGCNA
+allowWGCNAThreads()
+
+options(stringsAsFactors = FALSE)
+
+# WGCNA parameters
+networkType = 'signed'     
+tomType = 'signed'
+corrType = 'bicor'
+maxBlockSize = 30000
+minModSize = 100
+modMergeCutHeight = 0.20
+deepSplit = 4
+
+resultpath = here("WGCNAresults")
+dir.create(resultpath)
+
+# Read in data
+load(here("data","processed","exprDataAdj.Rdata"))
+
+datExpr = t(exprDataAdj)
+datTraits = as.data.frame(labelData[,c("subgrp",
+                                       "age",
+                                       "sex",
+                                       "batch",
+                                       "RIN")])
+rownames(datTraits) = labelData$exprColNames
+datTraits$sex = as.numeric(factor(datTraits$sex))
+datTraits$subgrp = as.numeric(factor(datTraits$subgrp))
+datTraits$batch = as.numeric(factor(datTraits$batch))
+```
+
+## Choose soft-threshold power
+```{r, warning=FALSE, message=FALSE}
+powers = c(1:30)
+if (corrType=="pearson"){
+  corFnc2use = "cor"
+}else if (corrType=="bicor"){
+  corFnc2use = corrType
+}
+sft = pickSoftThreshold(datExpr, 
+                        powerVector = powers, 
+                        verbose = 5, 
+                        networkType = networkType, 
+                        corFnc = corrType)
+
+makeSoftPowerPlot <- function(sft, powers, cex1 = 0.9){
+  # Scale-free topology fit index as a function of the soft-thresholding power
+  par(mfrow = c(1,2))
+  plot(sft$fitIndices[,1], 
+       -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+       xlab = "Soft Threshold (power)",
+       ylab = "Scale Free Topology Model Fit,signed R^2",
+       type = "n",
+       main = paste("Scale independence"))
+  text(sft$fitIndices[,1], 
+       -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+       labels = powers,
+       cex = cex1,
+       col = "red")
+  abline(h = 0.90, col = "red")
+  ## Mean connectivity as a function of the soft-thresholding power
+  plot(sft$fitIndices[,1], 
+       sft$fitIndices[,5],
+       xlab="Soft Threshold (power)",
+       ylab="Mean Connectivity", 
+       type="n",
+       main = "Mean connectivity")
+  text(sft$fitIndices[,1], 
+       sft$fitIndices[,5], 
+       labels=powers, 
+       cex=cex1,
+       col="red")
+}
+
+makeSoftPowerPlot(sft = sft, powers = powers)
+```
+
+## Run blockwiseModules
+
+```{r, warning=FALSE, message=FALSE}
+softPower = 16
+
+## Run an automated network analysis
+net3 = blockwiseModules(datExpr,
+                         power = softPower,
+                         deepSplit = deepSplit,
+                         minModuleSize = minModSize,
+                         mergeCutHeight = modMergeCutHeight, 
+                         detectCutHeight = 0.9999,
+                         corType = corrType,
+                         networkType = networkType,
+                         pamStage = FALSE,
+                         pamRespectsDendro = TRUE,
+                         verbose = 3,
+                         saveTOMs = FALSE,
+                         maxBlockSize = maxBlockSize, 
+                         numericLabels = TRUE)
+
+net3$moduleNumbers = net3$colors
+net3$colors = labels2colors(net3$moduleNumbers)
+
+moduleLabels = net3$moduleNumbers
+moduleColors = net3$colors
+modNum_tab = data.frame(table(moduleLabels))
+modCol_tab = data.frame(table(moduleColors))
+modColNum_tab = cbind(moduleLabels = modNum_tab$moduleLabels, 
+                      modCol_tab[order(-modCol_tab$Freq),])
+knitr::kable(modColNum_tab)
+
+rownames(net3$MEs) = labelData$subjectId
+tmp_MEs = net3$MEs
+# rename columns in net3$MEs
+for (i in 1:dim(tmp_MEs)[2]){
+  tmp_mnum = substr(colnames(tmp_MEs)[i], 3, nchar(colnames(tmp_MEs)[i]))
+  if (nchar(tmp_mnum)==1){
+    new_mnum = sprintf("M0%s",tmp_mnum)
+  } else if (nchar(tmp_mnum)==2){
+    new_mnum = sprintf("M%s",tmp_mnum)
+  }
+  colnames(tmp_MEs)[i] = new_mnum
+}
+net3$MEs_colreordered = tmp_MEs[,sort(colnames(tmp_MEs))]
+nums2use = 0:(dim(tmp_MEs)[2]-1)
+for (i in 1:length(nums2use)){
+  colnames(net3$MEs_colreordered)[i] = sprintf("M%d",nums2use[i])
+}
+if (sum(colnames(net3$MEs_colreordered)=="M0")>0){
+  net3$MEs_colreordered = net3$MEs_colreordered[,2:ncol(net3$MEs_colreordered)]
+}
+
+# order rows by subgrp2 and then subjectId
+new_label_data = labelData
+new_label_data2 = new_label_data[order(new_label_data$subgrp,
+                                       order(new_label_data$subjectId)),]
+net3$MEs_colreordered = net3$MEs_colreordered[new_label_data2$subjectId,]
+
+# rename columns in net3$MEs
+for (i in 1:dim(net3$MEs)[2]){
+  tmp_mnum = substr(colnames(net3$MEs)[i], 3, nchar(colnames(net3$MEs)[i]))
+  new_mnum = sprintf("M%s",tmp_mnum)
+  colnames(net3$MEs)[i] = new_mnum
+}
+```
+
+## Make TOM plot
+```{r, warning=FALSE, message=FALSE}
+plotDendroAndColors(net3$dendrograms[[1]], 
+                    net3$colors, "Dynamic Tree Cut",
+                    dendroLabels = FALSE, 
+                    hang = 0.03, 
+                    addGuide = TRUE, 
+                    guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+```
+
+## Make eigengene network plot
+```{r, warning=FALSE, message=FALSE}
+MEcorMat = data.frame(cor(net3$MEs))
+MEcorMat = MEcorMat[!(names(MEcorMat) %in% "M0"), 
+                    !(names(MEcorMat) %in% "M0")]
+
+heatmap.2(as.matrix(MEcorMat),
+          col = blueWhiteRed(50), 
+          Rowv = TRUE, 
+          trace = "none",
+          cellnote= round(as.matrix(MEcorMat),digits = 2), 
+          notecol = "black",
+          notecex=0.5,
+          density.info = "none", 
+          key.xlab ="ME Correlation (r)")
+```
+
+## Write out results files
+```{r, warning=FALSE, message=FALSE}
+# write ME files
+fname2write = here("WGCNAresults","module_eigengenes.csv")
+write.csv(net3$MEs,file = fname2write)
+write.table(net3$MEs_colreordered, 
+            file = here("WGCNAresults","data4pls.txt"), 
+            quote = FALSE, 
+            row.names = FALSE, 
+            sep="\t",
+            col.names = FALSE)
+
+# compute module membership and write out to file
+kme_data = signedKME(datExpr = datExpr, datME = net3$MEs)
+for (i in 1:dim(net3$MEs)[2]){
+  colnames(kme_data)[i] = sprintf("kME.%s",colnames(net3$MEs)[i])
+}
+geneInfo2use = geneInfo[,c("PROBE_ID","geneSymbol")]
+
+wgcna_res_data = cbind(geneInfo2use,
+                       data.frame(moduleLabels, moduleColors),
+                       kme_data)
+write.csv(wgcna_res_data, 
+          file = here("WGCNAresults", "wgcna_results_summary.csv"), 
+          quote = FALSE, 
+          col.names = FALSE, 
+          row.names = FALSE)
+```
+
+## Run DE analysis on module eigengenes
+
+```{r, warning=FALSE, message=FALSE}
+medata = net3$MEs
+nmods = dim(medata)[2]
+medata$group = factor(labelData$subgrp)
+medata$sex = factor(labelData$sex)
+medata$age = labelData$age
+medata$Dx = factor(labelData$Dx)
+medata$batch = factor(labelData$batch)
+medata$RIN = labelData$RIN
+covs2use = "group"
+
+res_colnames = c("Module",
+                 "Group.Fstat",
+                 "Group.pval", 
+                 "Group.fdr",
+                 "TD_vs_ASDPoor.tstat",
+                 "TD_vs_ASDPoor.pval",
+                 "TD_vs_ASDPoor.fdr",
+                 "TD_vs_ASDGood.tstat",
+                 "TD_vs_ASDGood.pval",
+                 "TD_vs_ASDGood.fdr",
+                 "ASDGood_vs_ASDPoor.tstat",
+                 "ASDGood_vs_ASDPoor.pval",
+                 "ASDGood_vs_ASDPoor.fdr")
+group_diff_res = data.frame(matrix(nrow = nmods-1, 
+                                   ncol = length(res_colnames)))
+colnames(group_diff_res) = res_colnames
+
+for (imod in 1:(nmods-1)){
+  module2use = sprintf("M%d",imod)
+  group_diff_res$Module[imod] = module2use
+  
+  # test for subgroup effect
+  form2use = as.formula(sprintf("%s ~ %s",module2use,covs2use))
+  mod2use = lm(formula = form2use, data = medata)
+  res = anova(mod2use)
+  group_diff_res$Group.Fstat[imod] = res["group","F value"]
+  group_diff_res$Group.pval[imod] = res["group","Pr(>F)"]
+
+  # test for TD vs ASD Poor effect
+  mask = medata$group=="TD" | medata$group=="Poor"
+  tmp_data = subset(medata, mask)
+  form2use = as.formula(sprintf("%s ~ %s",module2use,covs2use))
+  mod2use = t.test(formula = form2use, data = tmp_data)
+  group_diff_res$TD_vs_ASDPoor.tstat[imod] = mod2use$statistic
+  group_diff_res$TD_vs_ASDPoor.pval[imod] = mod2use$p.value
+
+  # test for TD vs ASD Good effect
+  mask = medata$group=="TD" | medata$group=="Good"
+  tmp_data = subset(medata, mask)
+  form2use = as.formula(sprintf("%s ~ %s",module2use,covs2use))
+  mod2use = t.test(formula = form2use, data = tmp_data)
+  group_diff_res$TD_vs_ASDGood.tstat[imod] = mod2use$statistic
+  group_diff_res$TD_vs_ASDGood.pval[imod] = mod2use$p.value
+  
+  # test for ASD Good vs ASD Poor effect
+  mask = medata$group=="Good" | medata$group=="Poor"
+  tmp_data = subset(medata, mask)
+  form2use = as.formula(sprintf("%s ~ %s",module2use,covs2use))
+  mod2use = t.test(formula = form2use, data = tmp_data)
+  group_diff_res$ASDGood_vs_ASDPoor.tstat[imod] = mod2use$statistic
+  group_diff_res$ASDGood_vs_ASDPoor.pval[imod] = mod2use$p.value
+}#for (imod in 1:(nmods-1)){
+rownames(group_diff_res) = group_diff_res$Module
+
+# compute FDR
+group_diff_res$Group.fdr = p.adjust(group_diff_res$Group.pval, 
+                                    method = "fdr")
+group_diff_res$TD_vs_ASDPoor.fdr = p.adjust(group_diff_res$TD_vs_ASDPoor.pval, 
+                                            method = "fdr")
+group_diff_res$TD_vs_ASDGood.fdr = p.adjust(group_diff_res$TD_vs_ASDGood.pval, 
+                                            method = "fdr")
+group_diff_res$ASDGood_vs_ASDPoor.fdr = p.adjust(group_diff_res$ASDGood_vs_ASDPoor.pval, 
+                                                 method = "fdr")
+group_diff_res
+```
+
+## Run WGCNA on TD only
+
+```{r, warning=FALSE, message=FALSE}
+# run on TD
+grp2use = "TD"
+datExpr_grp = datExpr[labelData$subgrp==grp2use,]
+datTraits_grp = datTraits[labelData$subgrp==grp2use,]
+
+# Choose a soft-threshold power
+powers = c(1:30)
+if (corrType=="pearson"){
+  corFnc2use = "cor"
+}else if (corrType=="bicor"){
+  corFnc2use = corrType
+}
+sft = pickSoftThreshold(datExpr_grp, 
+                        powerVector = powers, 
+                        verbose = 5,
+                        networkType = networkType,
+                        corFnc = corrType)
+
+makeSoftPowerPlot(sft = sft, powers = powers)
+
+softPower = 16
+
+## Run an automated network analysis
+net_tmp = blockwiseModules(datExpr,
+                            power = softPower,
+                            deepSplit = deepSplit,
+                            minModuleSize = minModSize,
+                            mergeCutHeight = modMergeCutHeight, 
+                            detectCutHeight = 0.9999,
+                            corType = corrType,
+                            networkType = networkType,
+                            pamStage = FALSE,
+                            pamRespectsDendro = TRUE,
+                            verbose = 3,
+                            saveTOMs = FALSE,
+                            maxBlockSize = maxBlockSize, 
+                            numericLabels = TRUE)
+
+td_colors = labels2colors(net_tmp$colors)
+datExpr_td = datExpr_grp
+```
+
+## Run WGCNA on ASD Good only
+
+```{r, warning=FALSE, message=FALSE}
+# run on ASD Good
+grp2use = "Good"
+datExpr_grp = datExpr[labelData$subgrp==grp2use,]
+datTraits_grp = datTraits[labelData$subgrp==grp2use,]
+
+# Choose a soft-threshold power
+powers = c(1:30)
+if (corrType=="pearson"){
+  corFnc2use = "cor"
+}else if (corrType=="bicor"){
+  corFnc2use = corrType
+}
+sft = pickSoftThreshold(datExpr_grp, 
+                         powerVector = powers, 
+                         verbose = 5,
+                         networkType = networkType,
+                         corFnc = corrType)
+
+makeSoftPowerPlot(sft = sft, powers = powers)
+
+softPower = 16
+
+## Run an automated network analysis
+net_tmp = blockwiseModules(datExpr,
+                            power = softPower,
+                            deepSplit = deepSplit,
+                            minModuleSize = minModSize,
+                            mergeCutHeight = modMergeCutHeight,
+                            detectCutHeight = 0.9999,
+                            corType = corrType,
+                            networkType = networkType,
+                            pamStage = FALSE,
+                            pamRespectsDendro = TRUE,
+                            verbose = 3,
+                            saveTOMs = FALSE,
+                            maxBlockSize = maxBlockSize, 
+                            numericLabels = TRUE)
+
+asdgood_colors = labels2colors(net_tmp$colors)
+datExpr_asdgood = datExpr_grp
+```
+
+## Run WGCNA on ASD Poor only
+
+```{r, warning=FALSE, message=FALSE}
+# run on ASD Poor
+grp2use = "Poor"
+datExpr_grp = datExpr[labelData$subgrp==grp2use,]
+datTraits_grp = datTraits[labelData$subgrp==grp2use,]
+
+# Choose a soft-threshold power
+powers = c(1:30)
+if (corrType=="pearson"){
+  corFnc2use = "cor"
+}else if (corrType=="bicor"){
+  corFnc2use = corrType
+}
+sft = pickSoftThreshold(datExpr_grp, 
+                        powerVector = powers, 
+                        verbose = 5,
+                        networkType = networkType,
+                        corFnc = corrType)
+
+makeSoftPowerPlot(sft = sft, powers = powers)
+
+softPower = 16
+
+## Run an automated network analysis
+net_tmp = blockwiseModules(datExpr,
+                            power = softPower,
+                            deepSplit = deepSplit,
+                            minModuleSize = minModSize,
+                            mergeCutHeight = modMergeCutHeight,
+                            detectCutHeight = 0.9999,
+                            corType = corrType,
+                            networkType = networkType,
+                            pamStage = FALSE,
+                            pamRespectsDendro = TRUE,
+                            verbose = 3,
+                            saveTOMs = FALSE,
+                            maxBlockSize = maxBlockSize, 
+                            numericLabels = TRUE)
+
+asdpoor_colors = labels2colors(net_tmp$colors)
+datExpr_asdpoor = datExpr_grp
+```
+
+## Function for reporting module preservation results
+
+```{r, warning=FALSE, message=FALSE}
+modulePreservationReport <- function(mp){
+  ref = 1
+  test = 2
+  
+  modColors = rownames(mp$preservation$observed[[ref]][[test]])
+  moduleSizes = mp$preservation$Z[[ref]][[test]][, 1]
+  plotMods = !(modColors %in% c("grey", "gold"))
+  text = modColors[plotMods]
+  plotData = cbind(mp$preservation$observed[[ref]][[test]][, 2], 
+                   mp$preservation$Z[[ref]][[test]][, 2])
+  mains = c("Preservation Median rank", "Preservation Zsummary")
+
+  # Start the plot
+  par(mfrow = c(1,2))
+  par(mar = c(4.5,4.5,2.5,1))
+  for (p in 1:2){
+    min = min(plotData[, p], na.rm = TRUE)
+    max = max(plotData[, p], na.rm = TRUE)
+    # Adjust ploting ranges appropriately
+    if (p==2){
+      if (min > -max/10) min = -max/10
+      ylim = c(min - 0.1 * (max-min), max + 0.1 * (max-min))
+    } else
+      ylim = c(max + 0.1 * (max-min), min - 0.1 * (max-min))
+    plot(moduleSizes[plotMods], 
+         plotData[plotMods, p], 
+         col = 1, 
+         bg = modColors[plotMods], 
+         pch = 21,
+         main = mains[p],
+         cex = 2.4,
+         ylab = mains[p], 
+         xlab = "Module size", 
+         log = "x",
+         ylim = ylim,
+         xlim = c(10, 2000), 
+         cex.lab = 1.2, 
+         cex.axis = 1.2, 
+         cex.main =1.4)
+    #labelPoints(moduleSizes[plotMods], 
+    #            plotData[plotMods, p], 
+    #            text, 
+    #            cex = 1, 
+    #            offs = 0.08);
+    
+    # For Zsummary, add threshold lines
+    if (p==2) {
+      abline(h=0)
+      abline(h=2, col = "blue", lty = 2)
+      abline(h=10, col = "darkgreen", lty = 2)
+    } # if
+  } # for
+  
+  statsObs = cbind(mp$quality$observed[[ref]][[test]][,-1], 
+                   mp$preservation$observed[[ref]][[test]][,-1])
+  statsZ = cbind(mp$quality$Z[[ref]][[test]][,-1], 
+                 mp$preservation$Z[[ref]][[test]][,-1])
+  
+  sumTable = cbind(statsObs[, c("medianRank.pres", "medianRank.qual")],
+               signif(statsZ[, c("Zsummary.pres", "Zsummary.qual")], 2))
+  sumTable
+} # function modulePreservationReport
+```
+
+## TD - ASD Good module preservation results
+
+```{r, warning=FALSE, message=FALSE}
+nperm = 1000
+rand_seed = 1
+
+setLabels = c("TD","ASDGood")
+multiExpr = list(TD = list(data = datExpr_td), 
+                 ASDGood = list(data = datExpr_asdgood))
+multiColor = list(TD = td_colors)
+
+mp_td_asdgood = modulePreservation(multiExpr,
+                                   multiColor,
+                                   networkType = networkType,
+                                   corFnc = corFnc2use,
+                                   referenceNetworks = 1,
+                                   nPermutations = nperm,
+                                   randomSeed = rand_seed,
+                                   quickCor = 0,
+                                   verbose = 0)
+
+mp_res = modulePreservationReport(mp_td_asdgood)
+mp_res
+```
+
+## TD - ASD Poor module preservation results
+
+```{r, warning=FALSE, message=FALSE}
+nperm = 1000
+rand_seed = 1
+
+setLabels = c("TD","ASDPoor");
+multiExpr = list(TD = list(data = datExpr_td), 
+                 ASDPoor = list(data = datExpr_asdpoor))
+multiColor = list(TD = td_colors)
+
+# Calculate module preservation stats
+mp_td_asdpoor = modulePreservation(multiExpr,
+                                   multiColor,
+                                   networkType = networkType,
+                                   corFnc = corFnc2use,
+                                   referenceNetworks = 1,
+                                   nPermutations = nperm,
+                                   randomSeed = rand_seed,
+                                   quickCor = 0,
+                                   verbose = 0)
+
+mp_res = modulePreservationReport(mp_td_asdpoor)
+mp_res
+```
+
+## ASD Good - ASD Poor module preservation results
+
+```{r, warning=FALSE, message=FALSE}
+nperm = 1000
+rand_seed = 1
+
+setLabels = c("ASDGood","ASDPoor")
+multiExpr = list(ASDGood = list(data = datExpr_asdgood), 
+                 ASDPoor = list(data = datExpr_asdpoor))
+multiColor = list(ASDGood = asdgood_colors)
+
+# Calculate module preservation stats
+mp_asdgood_asdpoor = modulePreservation(multiExpr,
+                                        multiColor,
+                                        networkType = networkType,
+                                        corFnc = corFnc2use,
+                                        referenceNetworks = 1,
+                                        nPermutations = nperm,
+                                        randomSeed = rand_seed,
+                                        quickCor = 0,
+                                        verbose = 0)
+
+mp_res = modulePreservationReport(mp_asdgood_asdpoor)
+mp_res
+```

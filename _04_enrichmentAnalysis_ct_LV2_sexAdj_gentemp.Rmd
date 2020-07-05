@@ -1,0 +1,942 @@
+---
+title: "enrichmentAnalysis.Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load data
+
+```{r, message=FALSE, warning=FALSE}
+library(easypackages)
+libraries("here","pheatmap","reshape2","ggplot2","patchwork","Biobase")
+source(here("code","genelistOverlap.R"))
+options(stringsAsFactors = FALSE)
+
+plspath = here("pls")
+datapath = here("data","tidy")
+plotdir = here("plots")
+
+ndigits2use = 4
+fdr_thresh = 0.05
+fontSize = 20
+dotSize = 10
+
+mod_names = c("M1","M2","M3","M4","M5","M6","M7","M8","M9","M10",
+              "M11","M12","M13","M14","M15","M16","M17","M18","M19","M20","M21")
+nmods = length(mod_names)
+
+# Load in gene lists for enrichment analyses
+load(here("data","tidy","enrichment_data2.Rdata"))
+load(here("data","tidy","gandal_genelists.Rdata"))
+load(here("data","tidy","velmeshev_genelists.Rdata"))
+load(here("data","tidy","won_genelists.Rdata"))
+
+
+wgcna_res = read.csv(here("WGCNAresults","wgcna_results_summary.csv"))
+backgroundTotal = dim(wgcna_res)[1]
+bglist = wgcna_res$geneSymbol
+M0_size = dim(subset(wgcna_res, wgcna_res$moduleLabels==0))[1]
+
+
+pls_fname = "plsres_all_ct_GenTemp_sexAdj_MEcorr_bootCI4plotting_LV2_ci95.csv"
+fname = here("pls","results",pls_fname)
+plsbootdata = read.csv(fname)
+
+var2use = "nonzero"
+
+td_tmp = subset(plsbootdata, plsbootdata$Grp=="TD")
+rownames(td_tmp) = 1:nmods
+poor_tmp = subset(plsbootdata, plsbootdata$Grp=="Poor")
+rownames(poor_tmp) = 1:nmods
+good_tmp = subset(plsbootdata, plsbootdata$Grp=="Good")
+rownames(good_tmp) = 1:nmods
+
+td_mods = as.numeric(rownames(td_tmp)[td_tmp[,var2use]==1])
+asd_poor_mods = as.numeric(rownames(poor_tmp)[poor_tmp[,var2use]==1])
+asd_good_mods = as.numeric(rownames(good_tmp)[good_tmp[,var2use]==1])
+
+if (identical(td_mods,numeric(0))){
+  td_mods = NA
+} else if (identical(asd_poor_mods,numeric(0))){
+  asd_poor_mods = NA
+} else if (identical(asd_good_mods,numeric(0))){
+  asd_good_mods = NA
+}
+
+mask = logical(length = nmods)
+nonzero_mods = sort(unique(c(td_mods, asd_poor_mods, asd_good_mods)))
+mask[nonzero_mods] = TRUE
+zero_mods = 1:nrow(td_tmp)
+zero_mods = zero_mods[!mask]
+
+nz_mods = mod_names[nonzero_mods]
+z_mods = mod_names[zero_mods]
+
+# non-zero and zero modules
+nonzeromods = nonzero_mods
+zeromods = zero_mods
+
+# Grab non-zero modules and report percentage of genes falling within those modules
+mask = is.element(wgcna_res$moduleLabels, nonzeromods)
+nonzeromod_data = subset(wgcna_res, mask)
+nz_genes = nonzeromod_data$geneSymbol
+write(nz_genes, file = file.path(datapath,"nonzeromod_genes_CT_LV2.txt"))
+# percentage of clustered genes falling within those modules
+nz_prop = dim(nonzeromod_data)[1]/(backgroundTotal-M0_size)
+nz_mods
+nz_prop
+
+# Grab zero modules and report percentage of genes falling within those modules
+mask = is.element(wgcna_res$moduleLabels, zeromods)
+zeromod_data = subset(wgcna_res, mask)
+z_genes = zeromod_data$geneSymbol
+write(z_genes, file = file.path(datapath,"zeromod_genes_CT_LV2.txt"))
+# percentage of clustered genes falling within those modules
+z_prop = dim(zeromod_data)[1]/(backgroundTotal-M0_size)
+z_mods
+z_prop
+```
+
+# Annotate each module by enrichment in broadly expressed and brain-specific genes
+
+```{r, message=FALSE, warning=FALSE}
+geneclasses = c("BroadGenesVG","BrainGenesVG")
+outcols = c("OR","pval","fdr")
+
+out_mats = vector(mode = "list", length = length(geneclasses))
+names(out_mats) = geneclasses
+for (igc in 1:length(geneclasses)){
+  out_res = data.frame(matrix(nrow = length(mod_names), 
+                              ncol = length(outcols)))
+  colnames(out_res) = outcols
+  rownames(out_res) = mod_names
+
+  # intersect genes2 list with background 
+  genes2 = eval(as.name(geneclasses[igc]))
+  mask = is.element(genes2,bglist)
+  genes2 = data.frame(genes2[mask])
+
+  for (imod in 1:length(mod_names)){
+    # filename for module list
+    genes1 = wgcna_res$geneSymbol[wgcna_res$moduleLabels==imod]
+    
+    overlap_res = genelistOverlap(genes1,
+                                  genes2,
+                                  backgroundTotal, 
+                                  print_result = FALSE, 
+                                  header = FALSE)
+    out_res[imod,1] = overlap_res[[1]]$OR
+    out_res[imod,2] = overlap_res[[1]]$hypergeo_p
+  }
+  out_res[,3] = p.adjust(out_res[,2], method = "fdr")
+  out_mats[[igc]] = out_res
+}
+```
+
+
+# Modules enriched for broadly expressed genes
+```{r, warning=FALSE, message=FALSE}
+out_mats[[1]]
+```
+
+# Modules enriched for brain-specific genes
+```{r, warning=FALSE, message=FALSE}
+out_mats[[2]]
+```
+
+<!-- # At the level of modules, test non-zero and zero modules for enrichment in broadly expressed, blood, brain, or lymphocyte modules -->
+
+<!-- ```{r, warning=FALSE, message=FALSE} -->
+<!-- # broadly expressed modules -->
+<!-- broadmods = mod_names[out_mats$BroadGenes$fdr<=fdr_thresh] -->
+
+<!-- # test enrichment between non-zero modules and broadly expressed modules -->
+<!-- overlap_res = genelistOverlap(nz_mods,  -->
+<!--                               broadmods,  -->
+<!--                               length(mod_names),  -->
+<!--                               print_result = TRUE) -->
+
+<!-- # test enrichment between zero modules and broadly expressed modules -->
+<!-- overlap_res = genelistOverlap(z_mods,  -->
+<!--                               broadmods,  -->
+<!--                               length(mod_names),  -->
+<!--                               print_result = TRUE) -->
+
+<!-- # blood modules -->
+<!-- bloodmods = mod_names[out_mats$BloodGenes$fdr<=fdr_thresh] -->
+
+<!-- # test enrichment between non-zero modules and blood modules -->
+<!-- overlap_res = genelistOverlap(nz_mods,  -->
+<!--                               bloodmods,  -->
+<!--                               length(mod_names),  -->
+<!--                               print_result = TRUE) -->
+
+<!-- # test enrichment between zero modules and blood modules -->
+<!-- overlap_res = genelistOverlap(z_mods,  -->
+<!--                               bloodmods,  -->
+<!--                               length(mod_names),  -->
+<!--                               print_result = TRUE) -->
+
+<!-- # brain expressed modules -->
+<!-- brainmods = mod_names[out_mats$BrainGenes$fdr<=fdr_thresh] -->
+
+<!-- # test enrichment between non-zero modules and brain modules -->
+<!-- overlap_res = genelistOverlap(nz_mods,  -->
+<!--                               brainmods,  -->
+<!--                               length(mod_names),  -->
+<!--                               print_result = TRUE) -->
+
+<!-- # test enrichment between zero modules and brain modules -->
+<!-- overlap_res = genelistOverlap(z_mods,  -->
+<!--                               brainmods,  -->
+<!--                               length(mod_names),  -->
+<!--                               print_result = TRUE) -->
+
+<!-- # lymphocyte modules -->
+<!-- lymphocytemods = mod_names[out_mats$LymphocyteGenes$fdr<=fdr_thresh] -->
+
+<!-- # test enrichment between non-zero modules and lymphocyte modules -->
+<!-- overlap_res = genelistOverlap(nz_mods, -->
+<!--                               lymphocytemods, -->
+<!--                               length(mod_names), -->
+<!--                               print_result = TRUE) -->
+
+<!-- # test enrichment between zero modules and lymphocyte modules -->
+<!-- overlap_res = genelistOverlap(z_mods, -->
+<!--                               lymphocytemods, -->
+<!--                               length(mod_names), -->
+<!--                               print_result = TRUE) -->
+<!-- ``` -->
+
+<!-- # At the level of modules, test for overlap between non-zero modules across groups -->
+
+<!-- ```{r, warning=FALSE, message=FALSE} -->
+<!-- # show the ASD Poor modules -->
+<!-- asd_poor_mods = mod_names[asd_poor_mods] -->
+
+<!-- # show the ASD Good modules -->
+<!-- asd_good_mods = mod_names[asd_good_mods] -->
+
+<!-- # show the TD modules -->
+<!-- td_mods = mod_names[td_mods] -->
+
+<!-- # test overlap between ASD Poor and ASD Good -->
+<!-- overlap_res = genelistOverlap(asd_poor_mods, -->
+<!--                               asd_good_mods, -->
+<!--                               length(mod_names), -->
+<!--                               print_result = TRUE) -->
+
+<!-- # test overlap between TD and ASD Good -->
+<!-- overlap_res = genelistOverlap(td_mods, -->
+<!--                               asd_good_mods, -->
+<!--                               length(mod_names), -->
+<!--                               print_result = TRUE) -->
+
+<!-- # test overlap between TD and ASD Poor -->
+<!-- overlap_res = genelistOverlap(td_mods, -->
+<!--                               asd_poor_mods, -->
+<!--                               length(mod_names), -->
+<!--                               print_result = TRUE) -->
+<!-- ``` -->
+
+## Cortical Thickness LV2
+
+```{r, warning=FALSE, message=FALSE}
+ct_data = read.csv(file.path(plspath,"results","plsres_all_ct_GenTemp_sexAdj_MEcorr_bootCI4plotting_LV2_ci95.csv"))
+ct_good = subset(ct_data,ct_data$Grp=="Good")
+ct_poor = subset(ct_data,ct_data$Grp=="Poor")
+ct_td = subset(ct_data,ct_data$Grp=="TD")
+
+# Cortical Thickness
+df2plot = data.frame(Good = ct_good$corr, Poor = ct_poor$corr, TD = ct_td$corr, ModName = ct_poor$ModName)
+
+df2plot$modtype = NA
+df2plot$modtype[c(13,2,16,21,10,15,20,3,19,14,12)] = "PosNonZero"
+df2plot$modtype[c(9,17,18)] = "NegNonZero"
+
+p1 = ggplot(data = df2plot, aes(x = Good, y = Poor))
+p1 = p1 + geom_point(data=df2plot, aes(fill=modtype), size=dotSize, colour="black", pch=21) + 
+  geom_smooth(method=lm, colour="black")
+p1 = p1 + xlab("ASD Good PLS Correlation") + ylab("ASD Poor PLS Correlation") + guides(colour=FALSE, fill=FALSE) +
+  ggtitle("ASD Good vs ASD Poor") +
+  scale_fill_manual(values = c("dark blue","dark red")) +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir, "plscorr_scatterplot_ASDGood_ASDPoor_CT_LV2.pdf"))
+p1
+
+cor.test(df2plot$Good, df2plot$Poor)
+
+
+df2plot$modtype = NA
+df2plot$modtype[c(13,2,16,21,10,20,3,19,14,12)] = "PosNonZero"
+df2plot$modtype[c(18,1)] = "NegNonZero"
+
+p2 = ggplot(data = df2plot, aes(x = TD, y = Poor))
+p2 = p2 + geom_point(data=df2plot, aes(fill=modtype), size=dotSize, colour="black", pch=21) +
+  geom_smooth(method=lm, colour="black")
+p2 = p2 + xlab("TD PLS Correlation") + ylab("ASD Poor PLS Correlation") + guides(colour=FALSE, fill=FALSE) + 
+  ggtitle("TD vs ASD Poor") +
+  scale_fill_manual(values = c("dark blue","dark red")) +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir, "plscorr_scatterplot_TD_ASDPoor_CT_LV2.pdf"))
+p2
+
+cor.test(df2plot$TD, df2plot$Poor)
+
+
+df2plot$modtype = NA
+df2plot$modtype[c(15)] = "PosNonZero"
+df2plot$modtype[c(17)] = "NegNonZero"
+
+p3 = ggplot(data = df2plot, aes(x = TD, y = Good))
+p3 = p3 + geom_point(data=df2plot, aes(fill=modtype), size=dotSize, colour="black", pch=21) +
+  geom_smooth(method=lm, colour="black")
+p3 = p3 + xlab("TD PLS Correlation") + ylab("ASD Good PLS Correlation") + guides(colour=FALSE, fill=FALSE) + 
+  ggtitle("TD vs ASD Good") +
+  scale_fill_manual(values = c("dark blue","dark red")) +
+  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize),
+        plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = file.path(plotdir, "plscorr_scatterplot_TD_ASDGood_CT_LV2.pdf"))
+p3
+
+cor.test(df2plot$TD, df2plot$Good)
+
+p_final = (p1 | p2 | p3)
+p_final
+```
+
+# Examine enrichment at the gene-level between gene classes and non-zero or zero modules
+
+```{r, warning=FALSE, message=FALSE}
+geneclasses = c("BroadGenesVG","BrainGenesVG")
+res_colnames = c("Non-Zero Modules","Zero Modules")
+
+ORmat = data.frame(matrix(nrow = length(geneclasses), 
+                          ncol = length(res_colnames)))
+logPmat = data.frame(matrix(nrow = length(geneclasses), 
+                            ncol = length(res_colnames)))
+Pmat = data.frame(matrix(nrow = length(geneclasses),
+                         ncol = length(res_colnames)))
+FDRmat = data.frame(matrix(nrow = length(geneclasses),
+                           ncol = length(res_colnames)))
+NOverlapmat = data.frame(matrix(nrow = length(geneclasses), 
+                          ncol = length(res_colnames)))
+
+colnames(ORmat) = res_colnames
+colnames(logPmat) = res_colnames
+colnames(Pmat) = res_colnames
+colnames(FDRmat) = res_colnames
+colnames(NOverlapmat) = res_colnames
+rownames(ORmat) = geneclasses
+rownames(logPmat) = geneclasses
+rownames(Pmat) = geneclasses
+rownames(FDRmat) = geneclasses
+rownames(NOverlapmat) = geneclasses
+
+for (i in 1:length(geneclasses)){
+  # intersect genes2 with background list
+  genes2 = eval(as.name(geneclasses[i]))
+  mask = is.element(genes2,bglist)
+  genes2 = data.frame(genes2[mask])
+  
+  overlap_res = genelistOverlap(nz_genes,
+                                genes2,
+                                backgroundTotal,
+                                print_result = FALSE,
+                                header = FALSE)
+  ORmat[i,1] = overlap_res[[1]]$OR
+  logPmat[i,1] = -log10(overlap_res[[1]]$hypergeo_p)
+  Pmat[i,1] = overlap_res[[1]]$hypergeo_p
+  NOverlapmat[i,1] = overlap_res[[1]]$gene_overlap
+
+  overlap_res = genelistOverlap(z_genes,
+                                genes2,
+                                backgroundTotal,
+                                print_result = FALSE,
+                                header = FALSE)
+  ORmat[i,2] = overlap_res[[1]]$OR
+  logPmat[i,2] = -log10(overlap_res[[1]]$hypergeo_p)
+  Pmat[i,2] = overlap_res[[1]]$hypergeo_p
+  NOverlapmat[i,2] = overlap_res[[1]]$gene_overlap
+}
+for (i in 1:dim(Pmat)[2]){
+  FDRmat[,i] = p.adjust(Pmat[,i], method = "fdr")
+}
+
+zLIM = c(0,30)
+par(mar = c(6, 8.5, 3, 3))
+WGCNA::labeledHeatmap(Matrix = logPmat,
+                      xLabels = colnames(ORmat), 
+                      yLabels = rownames(ORmat),
+                      ySymbols = NULL, 
+                      colorLabels = FALSE,
+                      colors = WGCNA::blueWhiteRed(100), 
+                      textMatrix = round(ORmat, digits = 2),
+                      setStdMargins = FALSE, 
+                      cex.text = 3, 
+                      zlim = zLIM)
+
+# Enrichment Odds Ratios
+ORmat
+
+# P-values
+Pmat
+
+# FDR
+FDRmat
+
+# Noverlap
+NOverlapmat
+
+```
+
+
+# All enrichments
+
+```{r, warning=FALSE, message=FALSE}
+geneclasses = list(HumanSpecific_Prenatal_Zhu,
+                   HumanSpecific_EarlyPostnatal_Zhu,
+                   HumanSpecific_Adult_Zhu,
+                   won_har_genes,
+                   won_hge_fetal_genes,
+                   won_hge_adult_genes,
+                   won_hle_genes,
+                   W234_PC1,
+                   W234_PC2,
+                   SongBirdDE,
+                   ASDPrenatal1,
+                   gandal_asd_down,
+                   gandal_asd_up,
+                   ASDCTXDownreg,
+                   ASDCTXUpreg,
+                   ASD102,
+                   SFARIASD,
+                   FMRP1,
+                   FMRP2,
+                   CHD81,
+                   CHD82,
+                   gandal_scz,
+                   gandal_bd,
+                   excitatory_de_genes,
+                   inhibitory_de_genes,
+                   microglia_de_genes,
+                   oligodendrocyte_de_genes,
+                   astrocyte_de_genes,
+                   endothelial_de_genes,
+                   vRG,oRG,PgS,PgG2M,IP,
+                   ExN,ExM,ExMU,ExDp1,ExDp2,
+                   InMGE,InCGE,
+                   OPC,End,Per,Mic)
+
+geneclassnames = c("Human-Specific Prenatal",
+                   "Human-Specific Early Postnatal",
+                   "Human-Specific Adult",
+                   "Human-Accelerated Genes",
+                   "Human-Gained Enhancers Fetal",
+                   "Human-Gained Enhancers Adult",
+                   "Human-Lossed Enhancers",
+                   "PC1",
+                   "PC2",
+                   "Song Bird DE",
+                   "ASD Prenatal1",
+                   "ASD DE Downreg",
+                   "ASD DE Upreg",
+                   "ASD CTX Downreg",
+                   "ASD CTX Upreg",
+                   "ASD 102 dnPTVs",
+                   "SFARI ASD",
+                   "FMRP Targets1",
+                   "FMRP Targets2",
+                   "CHD8 Targets1",
+                   "CHD8 Targets2",
+                   "SCZ DE",
+                   "BD DE",
+                   "ASD Excitatory",
+                   "ASD Inhibitory",
+                   "ASD Microglia",
+                   "ASD Oligodendrocyte",
+                   "ASD Astrocyte",
+                   "ASD Endothelial",
+                   "Ventricular Radial Glia",
+                   "Outer Radial Glia",
+                   "Cycling Progenitors S phase",
+                   "Cycling Progenitors G2M phase",
+                   "Intermediate Progenitors",
+                   "Migrating Excitatory",
+                   "Maturing Excitatory",
+                   "Maturing Excitatory Upper Enriched",
+                   "Excitatory Deep Layer 1",
+                   "Excitatory Deep Layer 2",
+                   "Interneuron MGE",
+                   "Interneuron CGE",
+                   "Oligodendrocyte Precursor Cells",
+                   "Endothelial",
+                   "Pericyte",
+                   "Microglia")
+
+res_colnames =  c("Non-Zero Modules","Zero Modules")
+ORmat = data.frame(matrix(nrow = length(geneclasses), 
+                          ncol = length(res_colnames)))
+logPmat = data.frame(matrix(nrow = length(geneclasses), 
+                            ncol = length(res_colnames)))
+Pmat = data.frame(matrix(nrow = length(geneclasses), 
+                         ncol = length(res_colnames)))
+FDRmat = data.frame(matrix(nrow = length(geneclasses), 
+                           ncol = length(res_colnames)))
+colnames(ORmat) = res_colnames
+colnames(logPmat) = res_colnames
+colnames(Pmat) = res_colnames
+colnames(FDRmat) = res_colnames
+rownames(ORmat) = geneclassnames
+rownames(logPmat) = geneclassnames
+rownames(Pmat) = geneclassnames
+rownames(FDRmat) = geneclassnames
+
+for (i in 1:length(geneclasses)){
+  # intersect with background list
+  genes2 = geneclasses[[i]]
+  mask = is.element(genes2,bglist)
+  genes2 = data.frame(genes2[mask])
+
+  overlap_res = genelistOverlap(nz_genes,
+                                genes2,
+                                backgroundTotal,
+                                print_result = FALSE,
+                                header = FALSE)
+  ORmat[i,"Non-Zero Modules"] = overlap_res[[1]]$OR
+  logPmat[i,"Non-Zero Modules"] = -log10(overlap_res[[1]]$hypergeo_p)
+  Pmat[i,"Non-Zero Modules"] = overlap_res[[1]]$hypergeo_p
+
+  if (is.element(geneclassnames[i],c("PC1","PC2"))){
+    genes2export = unique(as.character(overlap_res[[1]]$overlapping_genes))
+    write(genes2export, 
+          file = file.path(here("results",sprintf("%s_nonzero_overlap_CTLV2.txt",geneclassnames[i]))))
+  }
+  
+  overlap_res = genelistOverlap(z_genes,
+                                genes2,
+                                backgroundTotal,
+                                print_result = FALSE,
+                                header = FALSE)
+  ORmat[i,"Zero Modules"] = overlap_res[[1]]$OR
+  logPmat[i,"Zero Modules"] = -log10(overlap_res[[1]]$hypergeo_p)
+  Pmat[i,"Zero Modules"] = overlap_res[[1]]$hypergeo_p
+}
+for (i in 1:dim(Pmat)[2]){
+  FDRmat[,i] = p.adjust(Pmat[,i], method = "fdr")
+}
+```
+
+
+# Enrichment with Song Bird DE genes
+
+```{r, warning=FALSE, message=FALSE}
+geneclassnames = c("Song Bird DE")
+
+ORmat2use = ORmat[geneclassnames,]
+Pmat2use = Pmat[geneclassnames,]
+logPmat2use = logPmat[geneclassnames,]
+FDRmat2use = FDRmat[geneclassnames,]
+
+# Enrichment Odds Ratios
+ORmat2use
+
+# P-values
+Pmat2use
+
+# FDR
+FDRmat2use
+```
+
+# Enrichment with human-specific genes
+
+```{r, warning=FALSE, message=FALSE}
+geneclassnames = c("Human-Specific Prenatal",
+                   "Human-Specific Early Postnatal",
+                   "Human-Specific Adult",
+                   "Human-Accelerated Genes",
+                   "Human-Gained Enhancers Fetal",
+                   "Human-Gained Enhancers Adult",
+                   "Human-Lossed Enhancers")
+
+studyname = c("Zhu et al., 2018",
+              "Zhu et al., 2018",
+              "Zhu et al., 2018",
+              "Won et al., 2019",
+              "Won et al., 2019",
+              "Won et al., 2019",
+              "Won et al., 2019")
+
+ORmat2use = ORmat[geneclassnames,]
+Pmat2use = Pmat[geneclassnames,]
+logPmat2use = logPmat[geneclassnames,]
+FDRmat2use = FDRmat[geneclassnames,]
+
+# make figure
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+         number_color = "black", fontsize_number = 12,
+         show_rownames=TRUE,
+         labels_col = res_colnames,
+         color = colorRampPalette(c('light blue','white','red'))(100),
+         cluster_rows = FALSE, cluster_cols = FALSE,
+         breaks= seq(0,-log10(0.005), length=100))
+
+
+mat2use = logPmat2use
+mat2use$labels = rownames(mat2use)
+mat2use$cat = factor(studyname)
+df4plot = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels","cat")])
+mat2use = ORmat2use
+mat2use$labels = rownames(mat2use)
+tmp = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+df4plot$OR = tmp$value
+df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
+df4plot$cat = factor(df4plot$cat, levels = rev(unique(studyname)))
+
+p = ggplot(data = df4plot, aes(x = labels, y = value, fill=cat)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + 
+  geom_hline(yintercept = -log10(0.05)) +
+  coord_flip() #+ 
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+p
+
+fs2use = fontSize-5
+p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity", colour="black") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + 
+  geom_hline(yintercept = -log10(0.01), linetype="dashed") +
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+                       limits = c(min(df4plot$OR),max(df4plot$OR))) +
+  ylim(0,5) + 
+  coord_flip() + 
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+  theme(axis.text.x = element_text(size=fs2use),
+        # axis.text.y = element_text(size=fs2use),
+        axis.title.x = element_text(size=fs2use),
+        strip.text.x = element_text(size=fs2use),
+        plot.title = element_text(size=fs2use,hjust=0.5))
+ggsave(filename = file.path(plotdir,"humanspecific_enrichment_CT_LV2.pdf"))
+p
+
+# Enrichment Odds Ratios
+ORmat2use
+
+# P-values
+Pmat2use
+
+# FDR
+FDRmat2use
+```
+
+
+# Enrichment in prenatal gradient expression
+
+```{r, warning=FALSE, message=FALSE}
+geneclassnames = c("PC1",
+                   "PC2")
+
+ORmat2use = ORmat[geneclassnames,]
+Pmat2use = Pmat[geneclassnames,]
+logPmat2use = logPmat[geneclassnames,]
+FDRmat2use = FDRmat[geneclassnames,]
+
+# make figure
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+         number_color = "black", fontsize_number = fontSize,
+         show_rownames=TRUE,
+         labels_col = res_colnames,
+         color = colorRampPalette(c('light blue','white','red'))(100),
+         cluster_rows = FALSE, cluster_cols = FALSE,
+         fontsize_row = fontSize, fontsize_col = fontSize,
+         breaks= seq(0,-log10(0.005), length=100))
+
+
+mat2use = logPmat2use
+mat2use$labels = rownames(mat2use)
+df4plot = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+mat2use = ORmat2use
+mat2use$labels = rownames(mat2use)
+tmp = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+df4plot$OR = tmp$value
+df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
+
+p = ggplot(data = df4plot, aes(x = labels, y = value)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + 
+  geom_hline(yintercept = -log10(0.05)) +
+  coord_flip() #+ 
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+p = p +  theme(text = element_text(size=fontSize), 
+        axis.text.x = element_text(size=fontSize),
+        axis.text.y = element_text(size=fontSize))
+p
+
+# Enrichment Odds Ratios
+ORmat2use
+
+# P-values
+Pmat2use
+
+# FDR
+FDRmat2use
+```
+
+
+
+# Examine enrichment between non-zero or zero modules and song bird DE, Human Specific, ASD Prenatal, ASD CTX Dysregulated Modules, ASD PTVs, ASD SFARI, and FMRP and CHD8 targets
+
+```{r, warning=FALSE, message=FALSE}
+geneclassnames = c("ASD 102 dnPTVs",
+                   "SFARI ASD",
+                   "ASD DE Downreg",
+                   "ASD DE Upreg",
+                   "ASD CTX Downreg",
+                   "ASD CTX Upreg",
+                   "ASD Prenatal1",
+                   "FMRP Targets1",
+                   "FMRP Targets2",
+                   "CHD8 Targets1",
+                   "CHD8 Targets2",
+                   "SCZ DE",
+                   "BD DE")
+
+ORmat2use = ORmat[geneclassnames,]
+Pmat2use = Pmat[geneclassnames,]
+logPmat2use = logPmat[geneclassnames,]
+FDRmat2use = FDRmat[geneclassnames,]
+
+# make figure
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+         number_color = "black", fontsize_number = 12,
+         show_rownames=TRUE,
+         labels_col = res_colnames,
+         color = colorRampPalette(c('light blue','white','red'))(100),
+         cluster_rows = FALSE, cluster_cols = FALSE,
+         breaks= seq(0,-log10(0.005), length=100))
+
+mat2use = logPmat2use
+mat2use$labels = rownames(mat2use)
+df4plot = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+mat2use = ORmat2use
+mat2use$labels = rownames(mat2use)
+tmp = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+df4plot$OR = tmp$value
+df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
+
+p = ggplot(data = df4plot, aes(x = labels, y = value)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + 
+  geom_hline(yintercept = -log10(0.05)) +
+  coord_flip() #+ 
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+p
+
+fs2use = fontSize-5
+p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity", colour="black") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + 
+  geom_hline(yintercept = -log10(0.01), linetype="dashed") +
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+                       limits = c(min(df4plot$OR),max(df4plot$OR))) +
+  ylim(0,42) + 
+  coord_flip() + 
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+  theme(axis.text.x = element_text(size=fs2use),
+        # axis.text.y = element_text(size=fs2use),
+        axis.title.x = element_text(size=fs2use),
+        strip.text.x = element_text(size=fs2use),
+        plot.title = element_text(size=fs2use,hjust=0.5))
+ggsave(filename = file.path(plotdir,"asdgenelist_enrichment_CT_LV2.pdf"))
+p
+
+# Enrichment Odds Ratios
+ORmat2use
+
+# P-values
+Pmat2use
+
+# FDR
+FDRmat2use
+```
+
+# Examine enrichment between ASD DE cell-type lists (Velmeshev et al.,)
+
+```{r, warning=FALSE, message=FALSE}
+geneclassnames = c("ASD Excitatory",
+                   "ASD Inhibitory",
+                   "ASD Microglia",
+                   "ASD Oligodendrocyte",
+                   "ASD Astrocyte",
+                   "ASD Endothelial")
+
+ORmat2use = ORmat[geneclassnames,]
+Pmat2use = Pmat[geneclassnames,]
+logPmat2use = logPmat[geneclassnames,]
+FDRmat2use = FDRmat[geneclassnames,]
+
+# make figure
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+         number_color = "black", fontsize_number = 12,
+         show_rownames=TRUE,
+         labels_col = res_colnames,
+         color = colorRampPalette(c('light blue','white','red'))(100),
+         cluster_rows = FALSE, cluster_cols = FALSE,
+         breaks= seq(0,-log10(0.005), length=100))
+
+mat2use = logPmat2use
+mat2use$labels = rownames(mat2use)
+df4plot = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+mat2use = ORmat2use
+mat2use$labels = rownames(mat2use)
+tmp = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+df4plot$OR = tmp$value
+
+fs2use = fontSize-5
+df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
+p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity", colour="black") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + 
+  geom_hline(yintercept = -log10(0.01), linetype="dashed") +
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+                       limits = c(min(df4plot$OR),max(df4plot$OR))) +
+  ylim(0,3) + 
+  coord_flip() + 
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+  theme(axis.text.x = element_text(size=fs2use),
+        # axis.text.y = element_text(size=fs2use),
+        axis.title.x = element_text(size=fs2use),
+        strip.text.x = element_text(size=fs2use),
+        plot.title = element_text(size=fs2use,hjust=0.5))
+ggsave(filename = file.path(plotdir,"asdcelltypes_enrichment_CT_LV2.pdf"))
+p
+
+# Enrichment Odds Ratios
+ORmat2use
+
+# P-values
+Pmat2use
+
+# FDR
+FDRmat2use
+```
+
+# Examine enrichment between prenatal cell-type lists
+
+```{r, warning=FALSE, message=FALSE}
+geneclassnames = c("Ventricular Radial Glia",
+                   "Outer Radial Glia",
+                   "Cycling Progenitors S phase",
+                   "Cycling Progenitors G2M phase",
+                   "Intermediate Progenitors",
+                   "Migrating Excitatory",
+                   "Maturing Excitatory",
+                   "Maturing Excitatory Upper Enriched",
+                   "Excitatory Deep Layer 1",
+                   "Excitatory Deep Layer 2",
+                   "Interneuron MGE",
+                   "Interneuron CGE",
+                   "Oligodendrocyte Precursor Cells",
+                   "Endothelial",
+                   "Pericyte",
+                   "Microglia")
+
+genetypecat = c("Progenitor",
+                "Progenitor",
+                "Progenitor",
+                "Progenitor",
+                "Progenitor",
+                "Excitatory",
+                "Excitatory",
+                "Excitatory",
+                "Excitatory",
+                "Excitatory",
+                "Inhibitory",
+                "Inhibitory",
+                "Other",
+                "Other",
+                "Other",
+                "Other")
+
+
+ORmat2use = ORmat[geneclassnames,]
+Pmat2use = Pmat[geneclassnames,]
+logPmat2use = logPmat[geneclassnames,]
+FDRmat2use = FDRmat[geneclassnames,]
+
+# make figure
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+         number_color = "black", fontsize_number = 12,
+         show_rownames=TRUE,
+         labels_col = res_colnames,
+         color = colorRampPalette(c('light blue','white','red'))(100),
+         cluster_rows = FALSE, cluster_cols = FALSE,
+         breaks= seq(0,-log10(0.005), length=100))
+
+# make bar plot
+mat2use = logPmat2use
+mat2use$labels = rownames(mat2use)
+mat2use$cat = genetypecat
+mat2use$labels = factor(mat2use$labels, levels = rev(geneclassnames))
+mat2use$cat = factor(mat2use$cat, levels = rev(unique(genetypecat)))
+df4plot = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels","cat")])
+mat2use = ORmat2use
+mat2use$labels = rownames(mat2use)
+tmp = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
+df4plot$OR = tmp$value
+
+p = ggplot(data = df4plot, aes(x = labels, y = value, fill=cat)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + 
+  geom_hline(yintercept = -log10(0.01)) +
+  coord_flip() #+ 
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+p
+
+fs2use = fontSize-5
+p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
+p = p + geom_bar(stat="identity", colour="black") + 
+  ylab("-log10(p-value)") + 
+  xlab(" ") + ggtitle("CT LV2") +
+  geom_hline(yintercept = -log10(0.01), linetype = "dashed") +
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+                       limits = c(min(df4plot$OR),max(df4plot$OR))) +
+  ylim(0,30) +
+  coord_flip() +
+  # theme(text = element_text(size=fs2use),
+  theme(axis.text.x = element_text(size=fs2use),
+        # axis.text.y = element_text(size=fs2use),
+        axis.title.x = element_text(size=fs2use),
+        strip.text.x = element_text(size=fs2use),
+        plot.title = element_text(size=fs2use,hjust=0.5))
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
+ggsave(filename = file.path(plotdir, "prenatalCellTypes_enrichments_CT_LV2.pdf"))
+p
+
+# Enrichment Odds Ratios
+ORmat2use
+
+# P-values
+Pmat2use
+
+# FDR
+FDRmat2use
+```

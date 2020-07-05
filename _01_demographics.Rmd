@@ -1,0 +1,180 @@
+---
+title: "demographics"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load data
+
+```{r, message=FALSE, warning=FALSE}
+library(easypackages)
+libraries("here","psych")
+options(stringsAsFactors = FALSE)
+
+datapath = here("data","tidy")
+pheno_data_gex =read.csv(file.path(datapath,"labelData_allGEXMRIsubs.csv"))
+pheno_data_mri =read.csv(file.path(datapath,"labelData_all_MRI.csv"))
+pheno_data = merge(pheno_data_gex,pheno_data_mri, by = "subjectId")
+colnames(pheno_data)[colnames(pheno_data)=="age"] = "gex_age"
+colnames(pheno_data)[colnames(pheno_data)=="subgrp.x"] = "subgrp"
+pheno_data$sex = pheno_data$sex.x
+pheno_data$RIN = pheno_data$Final_RIN
+pheno_data$RIN[is.na(pheno_data$Final_RIN)] = mean(pheno_data$Final_RIN, na.rm = TRUE)
+```
+
+# Descriptive stats
+```{r, message=FALSE, warning=FALSE}
+cols2use = c("subgrp","gex_age","scan_age","RIN")
+df2use = pheno_data[,cols2use]
+describeBy(df2use, group = "subgrp")
+```
+
+# ANOVA on Age at blood sample
+```{r, message=FALSE, warning=FALSE}
+mod2use = lm(gex_age ~ subgrp, data = pheno_data)
+anova(mod2use)
+```
+
+# ANOVA on Age at scan
+```{r, message=FALSE, warning=FALSE}
+mod2use = lm(scan_age ~ subgrp, data = pheno_data)
+anova(mod2use)
+```
+
+# ANOVA on RIN
+```{r, message=FALSE, warning=FALSE}
+mod2use = lm(RIN ~ subgrp, data = pheno_data)
+anova(mod2use)
+```
+
+# Chi-square analysis on Sex * Subgrp
+```{r, message=FALSE, warning=FALSE}
+tab2use = table(pheno_data$sex, pheno_data$subgrp)
+res = chisq.test(tab2use)
+knitr::kable(tab2use)
+res
+```
+
+# Compute descriptives on intake and outcome data
+```{r, message=FALSE, warning=FALSE}
+subs2use = pheno_data$subjectId
+
+lw_data = read.csv("/Users/mlombardo/Dropbox/ACE_pheno/data/LWReport_05182018_updatedCertScores.csv")
+lw_data_sub = subset(lw_data, is.element(lw_data$subjectId,subs2use))
+
+cols2use = c("subjectId","sex","Dx","subgrp2","vine_agemo_in","vine_ComTotal_DomStd_in","vine_DlyTotal_DomStd_in","vine_SocTotal_DomStd_in","vine_MtrTotal_DomStd_in","vine_AdapBehav_DomStd_in","ados_ageMo_in","ados_CoSoTot_in","ados_RRTot_in","ados_CoSoTotRRTot_in","mullen_ageMo_in","mullen_VRT_in","mullen_FMT_in","mullen_RLT_in","mullen_ELT_in","mullen_ELC_Std_in",
+             "vine_agemo_out","vine_ComTotal_DomStd_out","vine_DlyTotal_DomStd_out","vine_SocTotal_DomStd_out","vine_MtrTotal_DomStd_out","vine_AdapBehav_DomStd_out","ados_ageMo_out","ados_CoSoTot_out","ados_RRTot_out","ados_CoSoTotRRTot_out","mullen_ageMo_out","mullen_VRT_out","mullen_FMT_out","mullen_RLT_out","mullen_ELT_out","mullen_ELC_Std_out")
+
+lw_data_flat = data.frame(matrix(nrow=length(subs2use), ncol=length(cols2use)))
+colnames(lw_data_flat) = cols2use
+rownames(lw_data_flat) = subs2use
+
+# loop over subjects
+for (sub in subs2use){
+  tmp_data = subset(lw_data, is.element(lw_data$subjectId,sub))
+  n_vine = sum(!is.element(tmp_data[,c("vine_agemo_1","vine_agemo_2","vine_agemo_3","vine_agemo_4","vine_agemo_5")],"NULL"))
+  n_ados = sum(!is.element(tmp_data[,c("ados_ageMo_1","ados_ageMo_2","ados_ageMo_3","ados_ageMo_4","ados_ageMo_5")],"NULL"))
+  n_mull = sum(!is.element(tmp_data[,c("mullen_ageMo_1","mullen_ageMo_2","mullen_ageMo_3","mullen_ageMo_4","mullen_ageMo_5")],"NULL"))
+  
+  
+  lw_data_flat[sub,"subjectId"] = sub
+  lw_data_flat[sub,"sex"] = tmp_data$gender
+  lw_data_flat[sub,"Dx"] =pheno_data[pheno_data$subjectId==sub,"Dx"]
+  lw_data_flat[sub,"subgrp2"] =pheno_data[pheno_data$subjectId==sub,"subgrp"]
+
+  # intake vars
+  i_tp = 1
+  vine_vars = c(sprintf("vine_agemo_%d",i_tp),
+                  sprintf("vine_ComTotal_DomStd_%d",i_tp),
+                  sprintf("vine_DlyTotal_DomStd_%d",i_tp),
+                  sprintf("vine_SocTotal_DomStd_%d",i_tp),
+                  sprintf("vine_MtrTotal_DomStd_%d",i_tp),
+                  sprintf("vine_AdapBehav_DomStd_%d",i_tp))
+  mull_vars = c(sprintf("mullen_ageMo_%d",i_tp),
+                  sprintf("mullen_VRT_%d",i_tp),
+                  sprintf("mullen_FMT_%d",i_tp),
+                  sprintf("mullen_RLT_%d",i_tp),
+                  sprintf("mullen_ELT_%d",i_tp),
+                  sprintf("mullen_ELC_Std_%d",i_tp))
+  ados_vars = c(sprintf("ados_ageMo_%d",i_tp),
+                  sprintf("ados_CoSoTot_%d",i_tp),
+                  sprintf("ados_RRTot_%d",i_tp),
+                  sprintf("ados_CoSoTotRRTot_%d",i_tp))
+
+  if (n_vine>0){
+    lw_data_flat[sub,"vine_agemo_in"] = tmp_data[,vine_vars[1]]
+    lw_data_flat[sub,"vine_ComTotal_DomStd_in"] = tmp_data[,vine_vars[2]]
+    lw_data_flat[sub,"vine_DlyTotal_DomStd_in"] = tmp_data[,vine_vars[3]]
+    lw_data_flat[sub,"vine_SocTotal_DomStd_in"] = tmp_data[,vine_vars[4]]
+    lw_data_flat[sub,"vine_MtrTotal_DomStd_in"] = tmp_data[,vine_vars[5]]
+    lw_data_flat[sub,"vine_AdapBehav_DomStd_in"] = tmp_data[,vine_vars[6]]
+  }
+  
+  if (n_mull>0){
+    lw_data_flat[sub,"mullen_ageMo_in"] = tmp_data[,mull_vars[1]]
+    lw_data_flat[sub,"mullen_VRT_in"] = tmp_data[,mull_vars[2]]
+    lw_data_flat[sub,"mullen_FMT_in"] = tmp_data[,mull_vars[3]]
+    lw_data_flat[sub,"mullen_RLT_in"] = tmp_data[,mull_vars[4]]
+    lw_data_flat[sub,"mullen_ELT_in"] = tmp_data[,mull_vars[5]]
+    lw_data_flat[sub,"mullen_ELC_Std_in"] = tmp_data[,mull_vars[6]]
+  }
+  
+  if (n_ados>0){
+    lw_data_flat[sub,"ados_ageMo_in"] = tmp_data[,ados_vars[1]]
+    lw_data_flat[sub,"ados_CoSoTot_in"] = tmp_data[,ados_vars[2]]
+    lw_data_flat[sub,"ados_RRTot_in"] = tmp_data[,ados_vars[3]]
+    lw_data_flat[sub,"ados_CoSoTotRRTot_in"] = tmp_data[,ados_vars[4]]
+  }
+    
+  # outcome vars
+  vine_vars = c(sprintf("vine_agemo_%d",n_vine),
+                  sprintf("vine_ComTotal_DomStd_%d",n_vine),
+                  sprintf("vine_DlyTotal_DomStd_%d",n_vine),
+                  sprintf("vine_SocTotal_DomStd_%d",n_vine),
+                  sprintf("vine_MtrTotal_DomStd_%d",n_vine),
+                  sprintf("vine_AdapBehav_DomStd_%d",n_vine))
+  mull_vars = c(sprintf("mullen_ageMo_%d",n_mull),
+                  sprintf("mullen_VRT_%d",n_mull),
+                  sprintf("mullen_FMT_%d",n_mull),
+                  sprintf("mullen_RLT_%d",n_mull),
+                  sprintf("mullen_ELT_%d",n_mull),
+                  sprintf("mullen_ELC_Std_%d",n_mull))
+  ados_vars = c(sprintf("ados_ageMo_%d",n_ados),
+                  sprintf("ados_CoSoTot_%d",n_ados),
+                  sprintf("ados_RRTot_%d",n_ados),
+                  sprintf("ados_CoSoTotRRTot_%d",n_ados))
+
+  if (n_vine>0){
+    lw_data_flat[sub,"vine_agemo_out"] = tmp_data[,vine_vars[1]]
+    lw_data_flat[sub,"vine_ComTotal_DomStd_out"] = tmp_data[,vine_vars[2]]
+    lw_data_flat[sub,"vine_DlyTotal_DomStd_out"] = tmp_data[,vine_vars[3]]
+    lw_data_flat[sub,"vine_SocTotal_DomStd_out"] = tmp_data[,vine_vars[4]]
+    lw_data_flat[sub,"vine_MtrTotal_DomStd_out"] = tmp_data[,vine_vars[5]]
+    lw_data_flat[sub,"vine_AdapBehav_DomStd_out"] = tmp_data[,vine_vars[6]]
+  }
+  
+  if (n_mull>0){
+    lw_data_flat[sub,"mullen_ageMo_out"] = tmp_data[,mull_vars[1]]
+    lw_data_flat[sub,"mullen_VRT_out"] = tmp_data[,mull_vars[2]]
+    lw_data_flat[sub,"mullen_FMT_out"] = tmp_data[,mull_vars[3]]
+    lw_data_flat[sub,"mullen_RLT_out"] = tmp_data[,mull_vars[4]]
+    lw_data_flat[sub,"mullen_ELT_out"] = tmp_data[,mull_vars[5]]
+    lw_data_flat[sub,"mullen_ELC_Std_out"] = tmp_data[,mull_vars[6]]
+  }
+  
+  if (n_ados>0){
+    lw_data_flat[sub,"ados_ageMo_out"] = tmp_data[,ados_vars[1]]
+    lw_data_flat[sub,"ados_CoSoTot_out"] = tmp_data[,ados_vars[2]]
+    lw_data_flat[sub,"ados_RRTot_out"] = tmp_data[,ados_vars[3]]
+    lw_data_flat[sub,"ados_CoSoTotRRTot_out"] = tmp_data[,ados_vars[4]]
+  }
+  
+} # for (sub in subs2use){
+
+cols2use = colnames(lw_data_flat)[2:36]
+df2use = lw_data_flat[,cols2use]
+describeBy(df2use, group = "subgrp2")
+```

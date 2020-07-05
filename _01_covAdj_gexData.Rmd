@@ -1,0 +1,150 @@
+---
+title: "Covariate Adjustment of Expression Data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Adjust gene expression data by batch, sex, and RIN and analyze cell type surrogate proportion variables
+
+The analysis for cell type surrogate proportion variables uses the CellCODE library(https://github.com/mchikina/CellCODE) based on Chikina, Zaslavsky, & Sealfon, (2015) Bioinformatics, 10, 1584-1591. Paper can be found here: https://academic.oup.com/bioinformatics/article/31/10/1584/177237. 
+
+## Setup
+
+```{r, warning=FALSE, message=FALSE}
+# load libraries
+library(here)
+install.packages(here("code","CellCODE"), repos=NULL, type="source")
+library(easypackages)
+libraries("here","limma","CellCODE","readxl","WGCNA","Biobase")
+options(stringsAsFactors = FALSE)
+```
+
+## Read in data
+```{r, warning=FALSE, message=FALSE}
+# load in superset of mircroarray raw gex data
+raw_gex_data = "~/Dropbox/data/ucsd_ace_microarray_data/dataQuantile.rda"
+load(raw_gex_data)
+
+# read in subject pheno list to use
+subs2use = read_excel(here("data","tidy","MASTER_labelData+subgrp_sameoldermri.xlsx"))
+subs2use = subset(subs2use,subs2use$use_subs==1)
+
+gex_subset = dataQuantile[,subs2use$exprColNames]
+
+# grab expression data
+edata = exprs(gex_subset)
+fdata = fData(gex_subset)
+
+# collapse rows
+collapsed_data = collapseRows(edata, fdata$geneSymbol, rownames(edata))
+exprData = collapsed_data$datETcollapsed
+geneInfo = data.frame(collapsed_data$group2row)
+colnames(geneInfo) = c("geneSymbol","PROBE_ID")
+geneInfo$geneSymbol[geneInfo$geneSymbol=="1-Mar"] = "MARCH1"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="2-Mar"] = "MARCH2"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="3-Mar"] = "MARCH3"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="4-Mar"] = "MARCH4"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="5-Mar"] = "MARCH5"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="6-Mar"] = "MARCH6"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="7-Mar"] = "MARCH7"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="8-Mar"] = "MARCH8"
+geneInfo$geneSymbol[geneInfo$geneSymbol=="9-Mar"] = "MARCH9"
+
+# grab pheno data
+final_pdata = subs2use
+final_pdata$Dx = final_pdata$diagnosis_binary
+final_pdata$Dx[final_pdata$Dx=="PDDNOS"] = "ASD"
+final_pdata$Dx = factor(final_pdata$Dx)
+final_pdata$sex = factor(final_pdata$sex)
+final_pdata$RIN = as.numeric(final_pdata$Final_RIN)
+final_pdata$RIN[is.na(final_pdata$RIN)] = mean(final_pdata$RIN,na.rm=TRUE)
+labelData = final_pdata
+
+save(exprData,geneInfo,labelData, file = "~/Dropbox/ACE_sMRI_GEX_PLS/reproAnalysis/data/tidy/exprData_allGEXMRIsubs.Rdata")
+write.csv(exprData,file = "~/Dropbox/ACE_sMRI_GEX_PLS/reproAnalysis/data/tidy/exprData_allGEXMRIsubs.csv")
+write.csv(geneInfo,file = "~/Dropbox/ACE_sMRI_GEX_PLS/reproAnalysis/data/tidy/geneInfo_allGEXMRIsubs.csv")
+write.csv(labelData,file = "~/Dropbox/ACE_sMRI_GEX_PLS/reproAnalysis/data/tidy/labelData_allGEXMRIsubs.csv")
+
+
+# load gene expression data, gene information, and labels
+load(here("data","tidy","exprData_allGEXMRIsubs.Rdata"))
+
+# chi-square test on batch vs subtype
+res = chisq.test(table(labelData$batch,labelData$subgrp))
+res
+
+# construct model
+cov_columns = c("batch2","batchWG6","sex","RIN")
+full_model = model.matrix(~0+as.factor(Dx) + 
+                            as.factor(batch) + 
+                            as.factor(sex) + 
+                            RIN, 
+                          data=labelData)
+colnames(full_model) = c("ASD", "TD",cov_columns)
+
+# fit model ----------------------------------------------------------
+fit = lmFit(exprData,full_model)
+
+# remove batch, sex, and RIN
+beta1 = fit$coefficients[, cov_columns, drop = FALSE]
+beta1[is.na(beta1)] = 0
+exprDataAdj = exprData - beta1 %*% t(full_model[,cov_columns])
+
+# save adjusted expression data
+save(exprDataAdj,geneInfo,labelData, 
+     file = here("data","processed","exprDataAdj.Rdata"))
+```
+
+## Estimate surrogate proportion variables for leukocyte cell types
+
+```{r, warning=FALSE, message=FALSE}
+data("IRIS")
+
+ref_data = exprDataAdj
+rownames(ref_data) = geneInfo$geneSymbol
+
+cellTypes2use = c("Neutrophil-Resting","CD4Tcell-N0",
+                  "Monocyte-Day0", "Bcell-naïve","NKcell-control")
+cellTypeNames = c("Neutrophil","Tcell", "Monocyte","Bcell", "NKcell")
+irisTag = tagData(IRIS[,cellTypes2use], 
+                  cutoff = 2, 
+                  max = 50, 
+                  ref = ref_data, 
+                  ref.mean = F)
+colnames(irisTag)= cellTypeNames
+
+SPVs = getAllSPVs(data = ref_data, 
+                  grp = labelData$subgrp,
+                  dataTag = irisTag,
+                  method = "mixed",
+                  plot = TRUE)
+```
+
+## Test SPVs for group-difference
+
+```{r, warning=FALSE, message=FALSE}
+SPVs = data.frame(SPVs)
+labelData$Neutrophil = SPVs$Neutrophil
+labelData$Tcell = SPVs$Tcell
+labelData$Monocyte = SPVs$Monocyte
+labelData$Bcell = SPVs$Bcell
+labelData$NKcell = SPVs$NKcell
+
+cols2use = c("Fstat","pval")
+aov_res = data.frame(matrix(nrow = length(cellTypeNames), 
+                            ncol = length(cols2use)))
+rownames(aov_res) = cellTypeNames
+colnames(aov_res) = cols2use
+
+for (i in 1:length(cellTypeNames)){
+  form2use = as.formula(sprintf("%s ~ subgrp",cellTypeNames[i]))
+  mod2use = lm(formula = form2use, data = labelData)
+  res = anova(mod2use)
+  aov_res[cellTypeNames[i],"Fstat"] = res["subgrp","F value"]
+  aov_res[cellTypeNames[i],"pval"] = res["subgrp","Pr(>F)"]
+}
+aov_res
+```

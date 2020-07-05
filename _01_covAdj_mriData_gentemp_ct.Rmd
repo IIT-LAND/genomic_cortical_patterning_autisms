@@ -1,0 +1,106 @@
+---
+title: "Covariate Adjustment of MRI Data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Adjust MRI data by sex
+
+## Setup
+
+```{r, warning=FALSE, message=FALSE}
+# load libraries
+library(easypackages)
+libraries("here","limma","readxl")
+options(stringsAsFactors = FALSE)
+```
+
+## Read in data
+```{r, warning=FALSE, message=FALSE}
+# load in MRI data
+good_df = read_excel(here("data","tidy","ASDGood_all_cortical_ct_HaglerGeneticTemplate.xlsx"))
+poor_df = read_excel(here("data","tidy","ASDPoor_all_cortical_ct_HaglerGeneticTemplate.xlsx"))
+td_df = read_excel(here("data","tidy","TD_all_cortical_ct_HaglerGeneticTemplate.xlsx"))
+
+mri_data = data.frame(rbind(good_df,poor_df,td_df))
+rownames(mri_data) = mri_data[,"subjectId"]
+# colnames(mri_data)[colnames(mri_data)=="subjectid"] = "subjectId"
+features = colnames(mri_data)[3:ncol(mri_data)]
+
+# load in pheno data for MRI
+pheno_data = read.csv(here("data","tidy","labelData_all_MRI.csv"))
+
+df2use = merge(mri_data, pheno_data, by="subjectId")
+```
+
+## Remove sex
+
+```{r, warning=FALSE, message=FALSE}
+mri_data_adj = data.frame(matrix(nrow = dim(mri_data)[1], ncol = length(features)+1))
+rownames(mri_data_adj) = rownames(mri_data)
+colnames(mri_data_adj) = c("subjectId",features)
+mri_data_adj$subjectId = rownames(mri_data)
+
+for (feature in features){
+  # formula
+  form2use = sprintf("%s ~ subgrp + sex",feature)
+  
+  # model
+  mod2use = lm(formula = form2use, data = df2use)
+  
+  # remove variation from covariate
+  covname2use = "sexMale"
+  beta1 = mod2use$coefficients[covname2use, drop = FALSE]
+  beta1[is.na(beta1)] = 0
+  
+  # construct model
+  cov_columns = c("subgrp","sex")
+  full_model = model.matrix(~0+as.factor(subgrp) + as.factor(sex), data = pheno_data)
+  colnames(full_model) = c("Good","Poor","TD","sex")
+  
+  # remove sex covariate from mri_data
+  covname2use = "sex"
+  mri_data_adj[,feature] = t(mri_data[,feature] - beta1 %*% t(full_model[,covname2use]))
+}
+
+# write adjusted data out to a file
+write.csv(mri_data_adj, file = here("data","tidy","mri_data_adj_sex_all_cortical_ct_HaglerGeneticTemplate.csv"))
+```
+
+
+## Remove sex and total cortical volume
+
+```{r, warning=FALSE, message=FALSE}
+mri_data_adj = data.frame(matrix(nrow = dim(mri_data)[1], ncol = length(features)+1))
+rownames(mri_data_adj) = rownames(mri_data)
+colnames(mri_data_adj) = c("subjectId",features)
+mri_data_adj$subjectId = rownames(mri_data)
+
+for (feature in features){
+  # formula
+  form2use = sprintf("%s ~ subgrp + sex + CortexVol",feature)
+  
+  # model
+  mod2use = lm(formula = form2use, data = df2use)
+  
+  # remove variation from covariate
+  covname2use = c("sexMale","CortexVol")
+  beta1 = mod2use$coefficients[covname2use, drop = FALSE]
+  beta1[is.na(beta1)] = 0
+  
+  # construct model
+  cov_columns = c("subgrp","sex","CortexVol")
+  full_model = model.matrix(~0+as.factor(subgrp) + as.factor(sex) + CortexVol, data = pheno_data)
+  colnames(full_model) = c("Good","Poor","TD","sex","CortexVol")
+  
+  # remove sex covariate from mri_data
+  covname2use = c("sex","CortexVol")
+  mri_data_adj[,feature] = t(mri_data[,feature] - beta1 %*% t(full_model[,covname2use]))
+}
+
+# write adjusted data out to a file
+write.csv(mri_data_adj, file = here("data","tidy","mri_data_adj_sexCortexVol_all_cortical_ct_HaglerGeneticTemplate.csv"))
+```
