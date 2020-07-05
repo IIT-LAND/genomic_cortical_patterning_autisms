@@ -12,6 +12,8 @@ Plotting of the Chen GCLUST parcellation is implemented with ggseg:  https://git
 
 PCA with covariate adjustment can be done using this repo: https://github.com/linzx06/AC-PCA.
 
+Gene lists for enrichment analyses can be found in the .Rdata files.
+
 `_01_demographics.Rmd` - Runs analysis on the clinical and demographic variables.
 
 `_01_covAdj_gexData.Rmd` - Does covariate adjustment of the gene expression data. Part of this analysis requires use of the CellCODE R library found here (https://github.com/mchikina/CellCODE).
