@@ -22,6 +22,8 @@ pheno_data_gex =read.csv(file.path(datapath,"labelData_allGEXMRIsubs.csv"))
 pheno_data_mri =read.csv(file.path(datapath,"labelData_all_MRI.csv"))
 
 
+
+
 # compute total SA and CT mean
 asd_mri = read.csv(file.path(datapath,"asd_mri_data.csv"))
 td_mri = read.csv(file.path(datapath,"td_mri_data.csv"))
@@ -53,6 +55,25 @@ region_names = c("CortexVol","SAtotal","CTmean",region_names)
 fs_data = merge(fs_data, pheno_data_mri[,c("subjectId","sex","scan_age")], by="subjectId")
 fs_data = merge(fs_data, all_mri[,c("subjectId","SAtotal","CTmean")], by="subjectId")
 
+
+#------------------------------------------------------------------------------
+# Remove the longitudinal duplicates
+dup_df = data.frame(t(table(fs_data$subjectId)))
+colnames(dup_df)[2:3] = c("subjectId","n")
+dup_subs = dup_df$subjectId[dup_df$n>1]
+
+rows2keep = numeric()
+rows2remove = numeric()
+for (isub in dup_subs){
+  dup_indx = which(fs_data$subjectId==isub)
+  rows2keep = c(rows2keep,dup_indx[1])
+  rows2remove = c(rows2remove,dup_indx[2:length(dup_indx)])
+}
+
+fs_data = fs_data[-rows2remove,]
+#------------------------------------------------------------------------------
+
+
 new_fs_data = fs_data
 
 colnames2use = c("Fstat","pval","etasq","fdrq","es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor",
@@ -63,9 +84,9 @@ rownames(output_res) = region_names
 colnames(output_res) = colnames2use
 
 for (icol in 1:length(region_names)){
-  
+
   y_var = region_names[icol]
-  
+
   if(is.element(y_var,c("CortexVol","SAtotal","CTmean"))){
     # make formula
     form2use = as.formula(sprintf("%s ~ Group + sex + scan_age", y_var))
@@ -77,48 +98,48 @@ for (icol in 1:length(region_names)){
     full_model = model.matrix(~0+ Group + CortexVol + sex + scan_age, data = fs_data)
     covname2use = c("CortexVol","sexMale","scan_age")
   }
-  
+
   # run linear model
   mod2use = lm(formula = form2use, data = fs_data)
-  
+
   # run an ANOVA
   res2use = anova(mod2use)
-  
+
   # grab ANOVA results and store into output_res
   output_res[y_var, "Fstat"] = res2use["Group", "F value"]
   output_res[y_var, "pval"] = res2use["Group", "Pr(>F)"]
-  
+
   # compute partial eta-squared as the effect size of the interaction effect
   eta_sq_res = etasq(mod2use)
   output_res[icol, "etasq"] = eta_sq_res["Group","Partial eta^2"]
-  
-  
+
+
 	# remove covariates before effect size computation
 	beta1 = mod2use$coefficients[covname2use, drop = FALSE]
 	beta1[is.na(beta1)] = 0
 
 	new_fs_data[,y_var] = as.numeric(t(fs_data[,y_var] - beta1 %*% t(full_model[,covname2use])))
-	
+
 	# compute effect sizes
 	mask1 = fs_data$Group=="Good"
 	mask2 = fs_data$Group=="TD"
 	output_res[y_var, "es.TD_vs_Good"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-	
+
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"] 
-	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"] 
-	
+	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"]
+	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"]
+
 	mask1 = fs_data$Group=="Poor"
 	mask2 = fs_data$Group=="TD"
 	output_res[y_var, "es.TD_vs_Poor"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-	
+
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"] 
-	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
+	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"]
+	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
 
 
 	mask1 = fs_data$Group=="Good"
@@ -128,8 +149,8 @@ for (icol in 1:length(region_names)){
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"] 
-	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
+	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"]
+	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
 
 }
 
@@ -166,12 +187,12 @@ gensim_order = c(sa_ordering,sa_ordering, ct_ordering,ct_ordering)
 df4plot = output_res[regions2use,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")]
 df4plot$phenotype = "CT"
 df4plot$phenotype[1:24] = "SA"
-df4plot$phenotype = factor(df4plot$phenotype) 
+df4plot$phenotype = factor(df4plot$phenotype)
 
 df4plot$hemisphere = "RH"
 df4plot$hemisphere[1:12] = "LH"
 df4plot$hemisphere[25:36] = "LH"
-df4plot$hemisphere = factor(df4plot$hemisphere) 
+df4plot$hemisphere = factor(df4plot$hemisphere)
 
 df4plot$full_region_names = factor(full_regnames)
 df4plot$gensim_gradient = gensim_order
@@ -188,18 +209,18 @@ sa_df$cluster[c(6,7,8,9,10,11,12)] = "posterior"
 sa_df$cluster = factor(sa_df$cluster)
 
 dotSize = 10
-fontSize = 20
+fontSize = 18
 
-p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
+p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) +
+  geom_point(size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("CT TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -209,15 +230,15 @@ p
 cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Good)
 
 p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("blue","red")) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Clusters") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -226,16 +247,16 @@ p
 
 t.test(es.TD_vs_Good ~ cluster, data = ct_df)
 
-p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
+p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) +
+  geom_point(size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("CT TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -245,15 +266,15 @@ p
 cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Poor)
 
 p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("blue","red")) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Clusters") +
+  ylab("Effect Size (Cohen's d)") +
+  ggtitle("Dorsal-Ventral Clusters TD vs ASD Poor") +
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -263,15 +284,15 @@ p
 t.test(es.TD_vs_Poor ~ cluster, data = ct_df)
 
 p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) + 
+  geom_point(size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("CT ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -281,15 +302,15 @@ p
 cor.test(ct_df$gensim_gradient, ct_df$es.Good_vs_Poor)
 
 p = ggplot(data = ct_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("blue","red")) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Clusters") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("Dorsal-Ventral Clusters ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -298,16 +319,16 @@ p
 
 t.test(es.Good_vs_Poor ~ cluster, data = ct_df)
 
-p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
+p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) +
+  geom_point(size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("SA TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -317,15 +338,15 @@ p
 cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Good)
 
 p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("blue","red")) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Clusters") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("Anterior-Posterior Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -335,15 +356,15 @@ p
 t.test(es.TD_vs_Good ~ cluster, data = sa_df)
 
 p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) + 
+  geom_point(size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("SA TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -353,15 +374,15 @@ p
 cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Poor)
 
 p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("blue","red")) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Clusters") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("Anterior-Posterior Clusters TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -370,16 +391,16 @@ p
 
 t.test(es.TD_vs_Poor ~ cluster, data = sa_df)
 
-p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
+p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) +
+  geom_point(size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Brain Region") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("SA ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -389,15 +410,15 @@ p
 cor.test(sa_df$gensim_gradient, sa_df$es.Good_vs_Poor)
 
 p = ggplot(data = sa_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
+  scale_fill_manual(values = c("blue","red")) +
+  guides(colour=FALSE, fill=FALSE) +
+  xlab("Clusters") +
+  ylab("Effect Size (Cohen's d)") +
   ggtitle("Anterior-Posterior Clusters ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -411,150 +432,12 @@ t.test(es.Good_vs_Poor ~ cluster, data = sa_df)
 dotSize = 6
 fontSize=28
 
-fdr_thresh = 0.01
+fdr_thresh = 0.05
 output_res_fdr = output_res[output_res$fdrq<=fdr_thresh,]
 output_res_fdr[order(output_res_fdr$pval),]
 
-df2plot = output_res[4:nrow(output_res),]
-df2plot$region = rownames(df2plot)
-new_region_labels = c("motor-premotor","occipital","posterolateral temporal","superior parietal",
-                      "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
-                      "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
-                      "motor-premotor","occipital","posterolateral temporal","superior parietal",
-                      "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
-                      "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
-                      "motor-premotor-supplementary motor area","ventral frontal",
-                      "ventromedial occipital","inferior parietal","middle temporal","perisylvian",
-                      "dorsolateral prefrontal","occipital","temporal pole","superior parietal",
-                      "medial prefrontal","medial temporal",
-                      "motor-premotor-supplementary motor area","ventral frontal",
-                      "ventromedial occipital","inferior parietal","middle temporal","perisylvian",
-                      "dorsolateral prefrontal","occipital","temporal pole","superior parietal",
-                      "medial prefrontal","medial temporal")
-hemi_labels = c("LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH",
-                      "LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH")
-metric_labels = c("SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT")
 
-df2plot$region = new_region_labels
-df2plot$hemisphere = hemi_labels
-df2plot$metric = metric_labels
-
-
-colors2use = get_ggColorHue(7)
-
-# SA F-stat
-d2plot = subset(df2plot, df2plot$metric=="SA" & df2plot$fdrq<=fdr_thresh)
-d2plot$label2fill = factor(c(1:dim(d2plot)[1]))
-
-# make figure
-mat2plot = t(d2plot[,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")])
-pheatmap(mat2plot, 
-         display_numbers = round(mat2plot,digits=2), 
-         number_color = "black", fontsize_number = 18,
-         show_rownames=TRUE,
-         labels_col = colnames(mat2plot),
-         color = colorRampPalette(c('light blue','white','red'))(100),
-         cluster_rows = TRUE, cluster_cols = TRUE)
-
-
-# LH
-df2use = subset(d2plot, d2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(d2plot, d2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-sig_reg = rownames(d2plot)
-reg_names = d2plot$region
-metric_names = d2plot$metric
-cols2use = list(c("#f53224","#f8766d","#fcbbb6"),
-                c("#785e00","#c49a00","#ffcc12"),
-                c("#306800","#53b400","#76ff01"),
-                c("#007459","#00c094","#0effc8"),
-                c("#007b9f","#00b6eb","#39d2ff"),
-                c("#6a3eff","#a58aff","#e0d7ff"),
-                c("#f916c4","#fb61d7","#fdacea"))
-ylims = list(c(0.6,1.3), c(0.8,1.15), c(0.75,1.35), c(0.8,1.35),
-             c(0.8,1.4), c(0.8, 1.15), c(0.7,1.1))
-                
-for (ireg in 1:length(sig_reg)){
-  region = sig_reg[ireg]
-  reg_name = reg_names[ireg]
-  metric_name = metric_names[ireg]
-  p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, colour = "Group"))
-  p1 = p1 + geom_jitter(size = dotSize) +
-    geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-    scale_colour_manual(values=cols2use[[ireg]]) + guides(colour = FALSE) + 
-    xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims[[ireg]]) + 
-    theme(text = element_text(size=fontSize),
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-  print(p1)
-  
-  tmp_df = d2plot[region,]
-  if (tmp_df$hemisphere=="LH"){
-    HEMI = "left"
-  } else if (tmp_df$hemisphere=="RH"){
-    HEMI = "right"
-  }
-  p = ggseg(.data = tmp_df, 
-            atlas = chenAr, 
-            mapping=aes(fill=label2fill), 
-            position="stacked", 
-            colour="black",
-            hemisphere=HEMI) +
-    scale_fill_manual(values = colors2use[ireg]) + guides(fill=FALSE) + 
-    theme(text = element_text(size=fontSize))
-  print(p)
-}
-
+# Plot Total Cortical Volume
 cols2use = c("#3d3d3d","#828282","#b3b3b3")
 region = "CortexVol"
 reg_name = "Total Cortical Volume"
@@ -563,15 +446,17 @@ ylims = c(450000,700000)
 p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
 p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + 
-  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + 
+  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) +
+  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) +
   theme(text = element_text(size=fontSize),
       axis.text.x = element_text(size=fontSize),
       axis.text.y = element_text(size=fontSize),
       plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = here("plots","TotalCorticalVolume.pdf"))
 p1
 
 
+# Plot Total Surface Area
 cols2use = c("#3d3d3d","#828282","#b3b3b3")
 region = "SAtotal"
 reg_name = "Total Surface Area"
@@ -580,292 +465,14 @@ ylims = c(90000,220000)
 p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
 p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + 
-  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + 
+  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) +
+  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) +
   theme(text = element_text(size=fontSize),
       axis.text.x = element_text(size=fontSize),
       axis.text.y = element_text(size=fontSize),
       plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = here("plots","TotalSurfaceArea.pdf"))
 p1
-
-
-
-# SA es.Good_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# SA es.TD_vs_Good
-# LH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# SA es.TD_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-
-# CT F-stat
-d2plot = subset(df2plot, df2plot$metric=="CT" & df2plot$fdrq<=fdr_thresh)
-d2plot$label2fill = factor(c(1:dim(d2plot)[1]))
-
-# make figure
-mat2plot = t(d2plot[,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")])
-pheatmap(mat2plot, 
-         display_numbers = round(mat2plot,digits=2), 
-         number_color = "black", fontsize_number = 18,
-         show_rownames=TRUE,
-         labels_col = colnames(mat2plot),
-         color = colorRampPalette(c('light blue','white','red'))(100),
-         cluster_rows = TRUE, cluster_cols = TRUE)
-
-
-
-# LH
-df2use = subset(d2plot, d2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_manual(values = colors2use[1:4]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(d2plot, d2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_manual(values = colors2use[5:7]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-sig_reg = rownames(d2plot)
-reg_names = d2plot$region
-metric_names = d2plot$metric
-cols2use = list(c("#f53224","#f8766d","#fcbbb6"),
-                c("#785e00","#c49a00","#ffcc12"),
-                c("#306800","#53b400","#76ff01"),
-                c("#007459","#00c094","#0effc8"),
-                c("#007b9f","#00b6eb","#39d2ff"),
-                c("#6a3eff","#a58aff","#e0d7ff"),
-                c("#f916c4","#fb61d7","#fdacea"))
-ylims = list(c(-0.4,0.1), c(-0.4,0.4), c(-0.4,0.3), c(0,0.7), 
-             c(-0.3,0.3), c(-0.2,0.5), c(0,0.8))
-                
-for (ireg in 1:length(sig_reg)){
-  region = sig_reg[ireg]
-  reg_name = reg_names[ireg]
-  metric_name = metric_names[ireg]
-  p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, colour = "Group"))
-  p1 = p1 + geom_jitter(size = dotSize) +
-    geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-    scale_colour_manual(values=cols2use[[ireg]]) + guides(colour = FALSE) + 
-    xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims[[ireg]]) + 
-    theme(text = element_text(size=fontSize),
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-  print(p1)
-  
-  tmp_df = d2plot[region,]
-  if (tmp_df$hemisphere=="LH"){
-    HEMI = "left"
-  } else if (tmp_df$hemisphere=="RH"){
-    HEMI = "right"
-  }
-  p = ggseg(.data = tmp_df, 
-            atlas = chenTh, 
-            mapping=aes(fill=label2fill), 
-            position="stacked", 
-            colour="black",
-            hemisphere=HEMI) +
-    scale_fill_manual(values = colors2use[ireg]) + guides(fill=FALSE) + 
-    theme(text = element_text(size=fontSize))
-  print(p)
-}
-
-
-
-# CT es.Good_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# CT es.TD_vs_Good
-# LH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# CT es.TD_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
 ```
 
 
@@ -902,6 +509,24 @@ region_names = c("CortexVol","SAtotal","CTmean",region_names)
 fs_data = merge(fs_data, pheno_data_mri[,c("subjectId","sex","scan_age")], by="subjectId")
 fs_data = merge(fs_data, all_mri[,c("subjectId","SAtotal","CTmean")], by="subjectId")
 
+#------------------------------------------------------------------------------
+# Remove duplicates
+dup_df = data.frame(t(table(fs_data$subjectId)))
+colnames(dup_df)[2:3] = c("subjectId","n")
+dup_subs = dup_df$subjectId[dup_df$n>1]
+
+rows2keep = numeric()
+rows2remove = numeric()
+for (isub in dup_subs){
+  dup_indx = which(fs_data$subjectId==isub)
+  rows2keep = c(rows2keep,dup_indx[1])
+  rows2remove = c(rows2remove,dup_indx[2:length(dup_indx)])
+}
+
+fs_data = fs_data[-rows2remove,]
+#------------------------------------------------------------------------------
+
+
 new_fs_data = fs_data
 
 colnames2use = c("Fstat","pval","etasq","fdrq","es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor",
@@ -912,9 +537,9 @@ rownames(output_res) = region_names
 colnames(output_res) = colnames2use
 
 for (icol in 1:length(region_names)){
-  
+
   y_var = region_names[icol]
-  
+
   # make formula
   form2use = as.formula(sprintf("%s ~ Group + sex + scan_age", y_var))
   full_model = model.matrix(~0+ Group + sex + scan_age, data = fs_data)
@@ -922,45 +547,45 @@ for (icol in 1:length(region_names)){
 
   # run linear model
   mod2use = lm(formula = form2use, data = fs_data)
-  
+
   # run an ANOVA
   res2use = anova(mod2use)
-  
+
   # grab ANOVA results and store into output_res
   output_res[y_var, "Fstat"] = res2use["Group", "F value"]
   output_res[y_var, "pval"] = res2use["Group", "Pr(>F)"]
-  
+
   # compute partial eta-squared as the effect size of the interaction effect
   eta_sq_res = etasq(mod2use)
   output_res[icol, "etasq"] = eta_sq_res["Group","Partial eta^2"]
-  
-  
+
+
 	# remove covariates before effect size computation
 	beta1 = mod2use$coefficients[covname2use, drop = FALSE]
 	beta1[is.na(beta1)] = 0
 
 	new_fs_data[,y_var] = as.numeric(t(fs_data[,y_var] - beta1 %*% t(full_model[,covname2use])))
-	
+
 	# compute effect sizes
 	mask1 = fs_data$Group=="Good"
 	mask2 = fs_data$Group=="TD"
 	output_res[y_var, "es.TD_vs_Good"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-	
+
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"] 
-	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"] 
-	
+	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"]
+	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"]
+
 	mask1 = fs_data$Group=="Poor"
 	mask2 = fs_data$Group=="TD"
 	output_res[y_var, "es.TD_vs_Poor"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-	
+
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"] 
-	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
+	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"]
+	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
 
 
 	mask1 = fs_data$Group=="Good"
@@ -970,8 +595,8 @@ for (icol in 1:length(region_names)){
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"] 
-	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
+	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"]
+	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
 
 }
 
@@ -984,720 +609,720 @@ output_res[order(output_res$pval),]
 
 
 
-```{r, warning=FALSE, message=FALSE}
-regions2use = colnames(fs_data)[5:(ncol(fs_data)-4)]
-full_regnames = c("motor-premotor","occipital","posterolateral temporal","superior parietal",
-                  "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
-                  "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
-                  "motor-premotor","occipital","posterolateral temporal","superior parietal",
-                  "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
-                  "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
-                  "motor-premotor-supplementary motor area","ventral frontal","ventromedial occipital","inferior parietal",
-                  "middle temporal","perisylvian","dorsolateral prefrontal","occipital",
-                  "temporal pole","superior parietal","medial prefrontal","medial temporal",
-                  "motor-premotor-supplementary motor area","ventral frontal","ventromedial occipital","inferior parietal",
-                  "middle temporal","perisylvian","dorsolateral prefrontal","occipital",
-                  "temporal pole","superior parietal","medial prefrontal","medial temporal")
-
-sa_ordering = c(1,12,7,10,
-                4,6,9,3,
-                8,11,2,5)
-ct_ordering = c(1,7,6,3,
-                10,4,11,5,
-                8,2,12,9)
-gensim_order = c(sa_ordering,sa_ordering, ct_ordering,ct_ordering)
-
-df4plot = output_res[regions2use,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")]
-df4plot$phenotype = "CT"
-df4plot$phenotype[1:24] = "SA"
-df4plot$phenotype = factor(df4plot$phenotype) 
-
-df4plot$hemisphere = "RH"
-df4plot$hemisphere[1:12] = "LH"
-df4plot$hemisphere[25:36] = "LH"
-df4plot$hemisphere = factor(df4plot$hemisphere) 
-
-df4plot$full_region_names = factor(full_regnames)
-df4plot$gensim_gradient = gensim_order
-
-ct_df = subset(df4plot, df4plot$phenotype=="CT")
-sa_df = subset(df4plot, df4plot$phenotype=="SA")
-
-ct_df$cluster = "dorsal"
-ct_df$cluster[c(6,7,8,9,10,11,12)] = "ventral"
-ct_df$cluster = factor(ct_df$cluster)
-
-sa_df$cluster = "anterior"
-sa_df$cluster[c(6,7,8,9,10,11,12)] = "posterior"
-sa_df$cluster = factor(sa_df$cluster)
-
-dotSize = 10
-fontSize = 20
-
-p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
-  geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("CT TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Good)
-
-p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-t.test(es.TD_vs_Good ~ cluster, data = ct_df)
-
-p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
-  geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("CT TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Poor)
-
-p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-t.test(es.TD_vs_Poor ~ cluster, data = ct_df)
-
-p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) + 
-  geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("CT ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-cor.test(ct_df$gensim_gradient, ct_df$es.Good_vs_Poor)
-
-p = ggplot(data = ct_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("Dorsal-Ventral Clusters ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-t.test(es.Good_vs_Poor ~ cluster, data = ct_df)
-
-p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
-  geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("SA TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Good)
-
-p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("Anterior-Posterior Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-t.test(es.TD_vs_Good ~ cluster, data = sa_df)
-
-p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) + 
-  geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("SA TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Poor)
-
-p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("Anterior-Posterior Clusters TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-t.test(es.TD_vs_Poor ~ cluster, data = sa_df)
-
-p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) + 
-  geom_point(size=dotSize, colour="black", pch=21) + 
-  geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) + 
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Brain Region") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("SA ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-cor.test(sa_df$gensim_gradient, sa_df$es.Good_vs_Poor)
-
-p = ggplot(data = sa_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
-  scale_fill_manual(values = c("blue","red")) + 
-  guides(colour=FALSE, fill=FALSE) +  
-  xlab("Clusters") + 
-  ylab("Effect Size (Cohen's d)") + 
-  ggtitle("Anterior-Posterior Clusters ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize), 
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-p
-
-t.test(es.Good_vs_Poor ~ cluster, data = sa_df)
-
-```
-
-
-
-```{r, warning=FALSE, message=FALSE}
-dotSize = 6
-fontSize=28
-
-fdr_thresh = 0.01
-output_res_fdr = output_res[output_res$fdrq<=fdr_thresh,]
-output_res_fdr[order(output_res_fdr$pval),]
-
-df2plot = output_res[4:nrow(output_res),]
-df2plot$region = rownames(df2plot)
-new_region_labels = c("motor-premotor","occipital","posterolateral temporal","superior parietal",
-                      "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
-                      "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
-                      "motor-premotor","occipital","posterolateral temporal","superior parietal",
-                      "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
-                      "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
-                      "motor-premotor-supplementary motor area","ventral frontal",
-                      "ventromedial occipital","inferior parietal","middle temporal","perisylvian",
-                      "dorsolateral prefrontal","occipital","temporal pole","superior parietal",
-                      "medial prefrontal","medial temporal",
-                      "motor-premotor-supplementary motor area","ventral frontal",
-                      "ventromedial occipital","inferior parietal","middle temporal","perisylvian",
-                      "dorsolateral prefrontal","occipital","temporal pole","superior parietal",
-                      "medial prefrontal","medial temporal")
-hemi_labels = c("LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH",
-                      "LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "LH","LH","LH","LH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH",
-                      "RH","RH","RH","RH")
-metric_labels = c("SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "SA","SA","SA","SA",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT",
-                  "CT","CT","CT","CT")
-
-df2plot$region = new_region_labels
-df2plot$hemisphere = hemi_labels
-df2plot$metric = metric_labels
-
-
-colors2use = get_ggColorHue(7)
-
-# SA F-stat
-d2plot = subset(df2plot, df2plot$metric=="SA" & df2plot$fdrq<=fdr_thresh)
-d2plot$label2fill = factor(c(1:dim(d2plot)[1]))
-
-# make figure
-mat2plot = t(d2plot[,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")])
-pheatmap(mat2plot, 
-         display_numbers = round(mat2plot,digits=2), 
-         number_color = "black", fontsize_number = 18,
-         show_rownames=TRUE,
-         labels_col = colnames(mat2plot),
-         color = colorRampPalette(c('light blue','white','red'))(100),
-         cluster_rows = TRUE, cluster_cols = TRUE)
-
-
-# LH
-df2use = subset(d2plot, d2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(d2plot, d2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-sig_reg = rownames(d2plot)
-reg_names = d2plot$region
-metric_names = d2plot$metric
-cols2use = list(c("#f53224","#f8766d","#fcbbb6"),
-                c("#785e00","#c49a00","#ffcc12"),
-                c("#306800","#53b400","#76ff01"),
-                c("#007459","#00c094","#0effc8"),
-                c("#007b9f","#00b6eb","#39d2ff"),
-                c("#6a3eff","#a58aff","#e0d7ff"),
-                c("#f916c4","#fb61d7","#fdacea"))
-ylims = list(c(0.6,1.3), c(0.8,1.15), c(0.75,1.35), c(0.8,1.35),
-             c(0.8,1.4), c(0.8, 1.15), c(0.7,1.1))
-                
-for (ireg in 1:length(sig_reg)){
-  region = sig_reg[ireg]
-  reg_name = reg_names[ireg]
-  metric_name = metric_names[ireg]
-  p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, colour = "Group"))
-  p1 = p1 + geom_jitter(size = dotSize) +
-    geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-    scale_colour_manual(values=cols2use[[ireg]]) + guides(colour = FALSE) + 
-    xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims[[ireg]]) + 
-    theme(text = element_text(size=fontSize),
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-  print(p1)
-  
-  tmp_df = d2plot[region,]
-  if (tmp_df$hemisphere=="LH"){
-    HEMI = "left"
-  } else if (tmp_df$hemisphere=="RH"){
-    HEMI = "right"
-  }
-  p = ggseg(.data = tmp_df, 
-            atlas = chenAr, 
-            mapping=aes(fill=label2fill), 
-            position="stacked", 
-            colour="black",
-            hemisphere=HEMI) +
-    scale_fill_manual(values = colors2use[ireg]) + guides(fill=FALSE) + 
-    theme(text = element_text(size=fontSize))
-  print(p)
-}
-
-cols2use = c("#3d3d3d","#828282","#b3b3b3")
-region = "CortexVol"
-reg_name = "Total Cortical Volume"
-metric_name = "Volume"
-ylims = c(450000,700000)
-p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
-p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + 
-  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + 
-  theme(text = element_text(size=fontSize),
-      axis.text.x = element_text(size=fontSize),
-      axis.text.y = element_text(size=fontSize),
-      plot.title = element_text(size=fontSize,hjust=0.5))
-p1
-
-cols2use = c("#3d3d3d","#828282","#b3b3b3")
-region = "SAtotal"
-reg_name = "Total Surface Area"
-metric_name = "SA"
-ylims = c(90000,220000)
-p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
-p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + 
-  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + 
-  theme(text = element_text(size=fontSize),
-      axis.text.x = element_text(size=fontSize),
-      axis.text.y = element_text(size=fontSize),
-      plot.title = element_text(size=fontSize,hjust=0.5))
-p1
-
-
-
-# SA es.Good_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# SA es.TD_vs_Good
-# LH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# SA es.TD_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenAr, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-
-# CT F-stat
-d2plot = subset(df2plot, df2plot$metric=="CT" & df2plot$fdrq<=fdr_thresh)
-d2plot$label2fill = factor(c(1:dim(d2plot)[1]))
-
-# make figure
-mat2plot = t(d2plot[,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")])
-pheatmap(mat2plot, 
-         display_numbers = round(mat2plot,digits=2), 
-         number_color = "black", fontsize_number = 18,
-         show_rownames=TRUE,
-         labels_col = colnames(mat2plot),
-         color = colorRampPalette(c('light blue','white','red'))(100),
-         cluster_rows = TRUE, cluster_cols = TRUE)
-
-
-
-# LH
-df2use = subset(d2plot, d2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_manual(values = colors2use[1:4]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(d2plot, d2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          # mapping=aes(fill=Fstat), 
-          mapping=aes(fill=label2fill), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_manual(values = colors2use[5:7]) + guides(fill=FALSE) + 
-  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
-  # guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-sig_reg = rownames(d2plot)
-reg_names = d2plot$region
-metric_names = d2plot$metric
-cols2use = list(c("#f53224","#f8766d","#fcbbb6"),
-                c("#785e00","#c49a00","#ffcc12"),
-                c("#306800","#53b400","#76ff01"),
-                c("#007459","#00c094","#0effc8"),
-                c("#007b9f","#00b6eb","#39d2ff"),
-                c("#6a3eff","#a58aff","#e0d7ff"),
-                c("#f916c4","#fb61d7","#fdacea"))
-ylims = list(c(-0.4,0.1), c(-0.4,0.4), c(-0.4,0.3), c(0,0.7), 
-             c(-0.3,0.3), c(-0.2,0.5), c(0,0.8))
-                
-for (ireg in 1:length(sig_reg)){
-  region = sig_reg[ireg]
-  reg_name = reg_names[ireg]
-  metric_name = metric_names[ireg]
-  p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, colour = "Group"))
-  p1 = p1 + geom_jitter(size = dotSize) +
-    geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-    scale_colour_manual(values=cols2use[[ireg]]) + guides(colour = FALSE) + 
-    xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims[[ireg]]) + 
-    theme(text = element_text(size=fontSize),
-        axis.text.x = element_text(size=fontSize),
-        axis.text.y = element_text(size=fontSize),
-        plot.title = element_text(size=fontSize,hjust=0.5))
-  print(p1)
-  
-  tmp_df = d2plot[region,]
-  if (tmp_df$hemisphere=="LH"){
-    HEMI = "left"
-  } else if (tmp_df$hemisphere=="RH"){
-    HEMI = "right"
-  }
-  p = ggseg(.data = tmp_df, 
-            atlas = chenTh, 
-            mapping=aes(fill=label2fill), 
-            position="stacked", 
-            colour="black",
-            hemisphere=HEMI) +
-    scale_fill_manual(values = colors2use[ireg]) + guides(fill=FALSE) + 
-    theme(text = element_text(size=fontSize))
-  print(p)
-}
-
-
-
-# CT es.Good_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.Good_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# CT es.TD_vs_Good
-# LH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Good), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-
-# CT es.TD_vs_Poor
-# LH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH")
-pl = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="left") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) + 
-  theme(text = element_text(size=fontSize))
-
-# RH
-df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH")
-
-pr = ggseg(.data = df2use, 
-          atlas = chenTh, 
-          mapping=aes(fill=es.TD_vs_Poor), 
-          position="stacked", 
-          colour="black",
-          hemisphere="right") +
-  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) +
-  guides(fill = guide_colourbar(nbin = 100)) +
-  theme(text = element_text(size=fontSize))
-
-pf = (pr)/(pl)
-pf
-
-```
+<!-- ```{r, warning=FALSE, message=FALSE} -->
+<!-- regions2use = colnames(fs_data)[5:(ncol(fs_data)-4)] -->
+<!-- full_regnames = c("motor-premotor","occipital","posterolateral temporal","superior parietal", -->
+<!--                   "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal", -->
+<!--                   "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral", -->
+<!--                   "motor-premotor","occipital","posterolateral temporal","superior parietal", -->
+<!--                   "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal", -->
+<!--                   "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral", -->
+<!--                   "motor-premotor-supplementary motor area","ventral frontal","ventromedial occipital","inferior parietal", -->
+<!--                   "middle temporal","perisylvian","dorsolateral prefrontal","occipital", -->
+<!--                   "temporal pole","superior parietal","medial prefrontal","medial temporal", -->
+<!--                   "motor-premotor-supplementary motor area","ventral frontal","ventromedial occipital","inferior parietal", -->
+<!--                   "middle temporal","perisylvian","dorsolateral prefrontal","occipital", -->
+<!--                   "temporal pole","superior parietal","medial prefrontal","medial temporal") -->
+
+<!-- sa_ordering = c(1,12,7,10, -->
+<!--                 4,6,9,3, -->
+<!--                 8,11,2,5) -->
+<!-- ct_ordering = c(1,7,6,3, -->
+<!--                 10,4,11,5, -->
+<!--                 8,2,12,9) -->
+<!-- gensim_order = c(sa_ordering,sa_ordering, ct_ordering,ct_ordering) -->
+
+<!-- df4plot = output_res[regions2use,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")] -->
+<!-- df4plot$phenotype = "CT" -->
+<!-- df4plot$phenotype[1:24] = "SA" -->
+<!-- df4plot$phenotype = factor(df4plot$phenotype) -->
+
+<!-- df4plot$hemisphere = "RH" -->
+<!-- df4plot$hemisphere[1:12] = "LH" -->
+<!-- df4plot$hemisphere[25:36] = "LH" -->
+<!-- df4plot$hemisphere = factor(df4plot$hemisphere) -->
+
+<!-- df4plot$full_region_names = factor(full_regnames) -->
+<!-- df4plot$gensim_gradient = gensim_order -->
+
+<!-- ct_df = subset(df4plot, df4plot$phenotype=="CT") -->
+<!-- sa_df = subset(df4plot, df4plot$phenotype=="SA") -->
+
+<!-- ct_df$cluster = "dorsal" -->
+<!-- ct_df$cluster[c(6,7,8,9,10,11,12)] = "ventral" -->
+<!-- ct_df$cluster = factor(ct_df$cluster) -->
+
+<!-- sa_df$cluster = "anterior" -->
+<!-- sa_df$cluster[c(6,7,8,9,10,11,12)] = "posterior" -->
+<!-- sa_df$cluster = factor(sa_df$cluster) -->
+
+<!-- dotSize = 10 -->
+<!-- fontSize = 20 -->
+
+<!-- p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Brain Region") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("CT TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Good) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + -->
+<!--   scale_fill_manual(values = c("blue","red")) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Clusters") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Good ~ cluster, data = ct_df) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Brain Region") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("CT TD vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Poor) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + -->
+<!--   scale_fill_manual(values = c("blue","red")) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Clusters") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Poor ~ cluster, data = ct_df) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Brain Region") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("CT ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- cor.test(ct_df$gensim_gradient, ct_df$es.Good_vs_Poor) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + -->
+<!--   scale_fill_manual(values = c("blue","red")) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Clusters") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("Dorsal-Ventral Clusters ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- t.test(es.Good_vs_Poor ~ cluster, data = ct_df) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Brain Region") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("SA TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Good) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + -->
+<!--   scale_fill_manual(values = c("blue","red")) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Clusters") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("Anterior-Posterior Clusters TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Good ~ cluster, data = sa_df) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Brain Region") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("SA TD vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Poor) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + -->
+<!--   scale_fill_manual(values = c("blue","red")) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Clusters") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("Anterior-Posterior Clusters TD vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Poor ~ cluster, data = sa_df) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Brain Region") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("SA ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- cor.test(sa_df$gensim_gradient, sa_df$es.Good_vs_Poor) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + -->
+<!--   scale_fill_manual(values = c("blue","red")) + -->
+<!--   guides(colour=FALSE, fill=FALSE) + -->
+<!--   xlab("Clusters") + -->
+<!--   ylab("Effect Size (Cohen's d)") + -->
+<!--   ggtitle("Anterior-Posterior Clusters ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p -->
+
+<!-- t.test(es.Good_vs_Poor ~ cluster, data = sa_df) -->
+
+<!-- ``` -->
+
+
+
+<!-- ```{r, warning=FALSE, message=FALSE} -->
+<!-- dotSize = 6 -->
+<!-- fontSize=28 -->
+
+<!-- fdr_thresh = 0.05 -->
+<!-- output_res_fdr = output_res[output_res$fdrq<=fdr_thresh,] -->
+<!-- output_res_fdr[order(output_res_fdr$pval),] -->
+
+<!-- df2plot = output_res[4:nrow(output_res),] -->
+<!-- df2plot$region = rownames(df2plot) -->
+<!-- new_region_labels = c("motor-premotor","occipital","posterolateral temporal","superior parietal", -->
+<!--                       "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal", -->
+<!--                       "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral", -->
+<!--                       "motor-premotor","occipital","posterolateral temporal","superior parietal", -->
+<!--                       "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal", -->
+<!--                       "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral", -->
+<!--                       "motor-premotor-supplementary motor area","ventral frontal", -->
+<!--                       "ventromedial occipital","inferior parietal","middle temporal","perisylvian", -->
+<!--                       "dorsolateral prefrontal","occipital","temporal pole","superior parietal", -->
+<!--                       "medial prefrontal","medial temporal", -->
+<!--                       "motor-premotor-supplementary motor area","ventral frontal", -->
+<!--                       "ventromedial occipital","inferior parietal","middle temporal","perisylvian", -->
+<!--                       "dorsolateral prefrontal","occipital","temporal pole","superior parietal", -->
+<!--                       "medial prefrontal","medial temporal") -->
+<!-- hemi_labels = c("LH","LH","LH","LH", -->
+<!--                       "LH","LH","LH","LH", -->
+<!--                       "LH","LH","LH","LH", -->
+<!--                       "RH","RH","RH","RH", -->
+<!--                       "RH","RH","RH","RH", -->
+<!--                       "RH","RH","RH","RH", -->
+<!--                       "LH","LH","LH","LH", -->
+<!--                       "LH","LH","LH","LH", -->
+<!--                       "LH","LH","LH","LH", -->
+<!--                       "RH","RH","RH","RH", -->
+<!--                       "RH","RH","RH","RH", -->
+<!--                       "RH","RH","RH","RH") -->
+<!-- metric_labels = c("SA","SA","SA","SA", -->
+<!--                   "SA","SA","SA","SA", -->
+<!--                   "SA","SA","SA","SA", -->
+<!--                   "SA","SA","SA","SA", -->
+<!--                   "SA","SA","SA","SA", -->
+<!--                   "SA","SA","SA","SA", -->
+<!--                   "CT","CT","CT","CT", -->
+<!--                   "CT","CT","CT","CT", -->
+<!--                   "CT","CT","CT","CT", -->
+<!--                   "CT","CT","CT","CT", -->
+<!--                   "CT","CT","CT","CT", -->
+<!--                   "CT","CT","CT","CT") -->
+
+<!-- df2plot$region = new_region_labels -->
+<!-- df2plot$hemisphere = hemi_labels -->
+<!-- df2plot$metric = metric_labels -->
+
+
+<!-- colors2use = get_ggColorHue(7) -->
+
+<!-- # SA F-stat -->
+<!-- d2plot = subset(df2plot, df2plot$metric=="SA" & df2plot$fdrq<=fdr_thresh) -->
+<!-- d2plot$label2fill = factor(c(1:dim(d2plot)[1])) -->
+
+<!-- # make figure -->
+<!-- mat2plot = t(d2plot[,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")]) -->
+<!-- pheatmap(mat2plot, -->
+<!--          display_numbers = round(mat2plot,digits=2), -->
+<!--          number_color = "black", fontsize_number = 18, -->
+<!--          show_rownames=TRUE, -->
+<!--          labels_col = colnames(mat2plot), -->
+<!--          color = colorRampPalette(c('light blue','white','red'))(100), -->
+<!--          cluster_rows = TRUE, cluster_cols = TRUE) -->
+
+
+<!-- # LH -->
+<!-- df2use = subset(d2plot, d2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           # mapping=aes(fill=Fstat), -->
+<!--           mapping=aes(fill=label2fill), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) + -->
+<!--   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) + -->
+<!--   # guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(d2plot, d2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           # mapping=aes(fill=Fstat), -->
+<!--           mapping=aes(fill=label2fill), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) + -->
+<!--   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) + -->
+<!--   # guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+<!-- sig_reg = rownames(d2plot) -->
+<!-- reg_names = d2plot$region -->
+<!-- metric_names = d2plot$metric -->
+<!-- cols2use = list(c("#f53224","#f8766d","#fcbbb6"), -->
+<!--                 c("#785e00","#c49a00","#ffcc12"), -->
+<!--                 c("#306800","#53b400","#76ff01"), -->
+<!--                 c("#007459","#00c094","#0effc8"), -->
+<!--                 c("#007b9f","#00b6eb","#39d2ff"), -->
+<!--                 c("#6a3eff","#a58aff","#e0d7ff"), -->
+<!--                 c("#f916c4","#fb61d7","#fdacea")) -->
+<!-- ylims = list(c(0.6,1.3), c(0.8,1.15), c(0.75,1.35), c(0.8,1.35), -->
+<!--              c(0.8,1.4), c(0.8, 1.15), c(0.7,1.1)) -->
+
+<!-- for (ireg in 1:length(sig_reg)){ -->
+<!--   region = sig_reg[ireg] -->
+<!--   reg_name = reg_names[ireg] -->
+<!--   metric_name = metric_names[ireg] -->
+<!--   p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, colour = "Group")) -->
+<!--   p1 = p1 + geom_jitter(size = dotSize) + -->
+<!--     geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--     scale_colour_manual(values=cols2use[[ireg]]) + guides(colour = FALSE) + -->
+<!--     xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims[[ireg]]) + -->
+<!--     theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!--   print(p1) -->
+
+<!--   tmp_df = d2plot[region,] -->
+<!--   if (tmp_df$hemisphere=="LH"){ -->
+<!--     HEMI = "left" -->
+<!--   } else if (tmp_df$hemisphere=="RH"){ -->
+<!--     HEMI = "right" -->
+<!--   } -->
+<!--   p = ggseg(.data = tmp_df, -->
+<!--             atlas = chenAr, -->
+<!--             mapping=aes(fill=label2fill), -->
+<!--             position="stacked", -->
+<!--             colour="black", -->
+<!--             hemisphere=HEMI) + -->
+<!--     scale_fill_manual(values = colors2use[ireg]) + guides(fill=FALSE) + -->
+<!--     theme(text = element_text(size=fontSize)) -->
+<!--   print(p) -->
+<!-- } -->
+
+<!-- cols2use = c("#3d3d3d","#828282","#b3b3b3") -->
+<!-- region = "CortexVol" -->
+<!-- reg_name = "Total Cortical Volume" -->
+<!-- metric_name = "Volume" -->
+<!-- ylims = c(450000,700000) -->
+<!-- p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group")) -->
+<!-- p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + -->
+<!--   xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--       axis.text.x = element_text(size=fontSize), -->
+<!--       axis.text.y = element_text(size=fontSize), -->
+<!--       plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p1 -->
+
+<!-- cols2use = c("#3d3d3d","#828282","#b3b3b3") -->
+<!-- region = "SAtotal" -->
+<!-- reg_name = "Total Surface Area" -->
+<!-- metric_name = "SA" -->
+<!-- ylims = c(90000,220000) -->
+<!-- p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group")) -->
+<!-- p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) + -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--   scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + -->
+<!--   xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + -->
+<!--   theme(text = element_text(size=fontSize), -->
+<!--       axis.text.x = element_text(size=fontSize), -->
+<!--       axis.text.y = element_text(size=fontSize), -->
+<!--       plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- p1 -->
+
+
+
+<!-- # SA es.Good_vs_Poor -->
+<!-- # LH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           mapping=aes(fill=es.Good_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           mapping=aes(fill=es.Good_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+
+<!-- # SA es.TD_vs_Good -->
+<!-- # LH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           mapping=aes(fill=es.TD_vs_Good), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           mapping=aes(fill=es.TD_vs_Good), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+
+<!-- # SA es.TD_vs_Poor -->
+<!-- # LH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           mapping=aes(fill=es.TD_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="SA" & df2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenAr, -->
+<!--           mapping=aes(fill=es.TD_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+
+
+<!-- # CT F-stat -->
+<!-- d2plot = subset(df2plot, df2plot$metric=="CT" & df2plot$fdrq<=fdr_thresh) -->
+<!-- d2plot$label2fill = factor(c(1:dim(d2plot)[1])) -->
+
+<!-- # make figure -->
+<!-- mat2plot = t(d2plot[,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")]) -->
+<!-- pheatmap(mat2plot, -->
+<!--          display_numbers = round(mat2plot,digits=2), -->
+<!--          number_color = "black", fontsize_number = 18, -->
+<!--          show_rownames=TRUE, -->
+<!--          labels_col = colnames(mat2plot), -->
+<!--          color = colorRampPalette(c('light blue','white','red'))(100), -->
+<!--          cluster_rows = TRUE, cluster_cols = TRUE) -->
+
+
+
+<!-- # LH -->
+<!-- df2use = subset(d2plot, d2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           # mapping=aes(fill=Fstat), -->
+<!--           mapping=aes(fill=label2fill), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_manual(values = colors2use[1:4]) + guides(fill=FALSE) + -->
+<!--   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) + -->
+<!--   # guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(d2plot, d2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           # mapping=aes(fill=Fstat), -->
+<!--           mapping=aes(fill=label2fill), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_manual(values = colors2use[5:7]) + guides(fill=FALSE) + -->
+<!--   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) + -->
+<!--   # guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+
+<!-- sig_reg = rownames(d2plot) -->
+<!-- reg_names = d2plot$region -->
+<!-- metric_names = d2plot$metric -->
+<!-- cols2use = list(c("#f53224","#f8766d","#fcbbb6"), -->
+<!--                 c("#785e00","#c49a00","#ffcc12"), -->
+<!--                 c("#306800","#53b400","#76ff01"), -->
+<!--                 c("#007459","#00c094","#0effc8"), -->
+<!--                 c("#007b9f","#00b6eb","#39d2ff"), -->
+<!--                 c("#6a3eff","#a58aff","#e0d7ff"), -->
+<!--                 c("#f916c4","#fb61d7","#fdacea")) -->
+<!-- ylims = list(c(-0.4,0.1), c(-0.4,0.4), c(-0.4,0.3), c(0,0.7), -->
+<!--              c(-0.3,0.3), c(-0.2,0.5), c(0,0.8)) -->
+
+<!-- for (ireg in 1:length(sig_reg)){ -->
+<!--   region = sig_reg[ireg] -->
+<!--   reg_name = reg_names[ireg] -->
+<!--   metric_name = metric_names[ireg] -->
+<!--   p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, colour = "Group")) -->
+<!--   p1 = p1 + geom_jitter(size = dotSize) + -->
+<!--     geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + -->
+<!--     scale_colour_manual(values=cols2use[[ireg]]) + guides(colour = FALSE) + -->
+<!--     xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims[[ireg]]) + -->
+<!--     theme(text = element_text(size=fontSize), -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!--   print(p1) -->
+
+<!--   tmp_df = d2plot[region,] -->
+<!--   if (tmp_df$hemisphere=="LH"){ -->
+<!--     HEMI = "left" -->
+<!--   } else if (tmp_df$hemisphere=="RH"){ -->
+<!--     HEMI = "right" -->
+<!--   } -->
+<!--   p = ggseg(.data = tmp_df, -->
+<!--             atlas = chenTh, -->
+<!--             mapping=aes(fill=label2fill), -->
+<!--             position="stacked", -->
+<!--             colour="black", -->
+<!--             hemisphere=HEMI) + -->
+<!--     scale_fill_manual(values = colors2use[ireg]) + guides(fill=FALSE) + -->
+<!--     theme(text = element_text(size=fontSize)) -->
+<!--   print(p) -->
+<!-- } -->
+
+
+
+<!-- # CT es.Good_vs_Poor -->
+<!-- # LH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           mapping=aes(fill=es.Good_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           mapping=aes(fill=es.Good_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+
+<!-- # CT es.TD_vs_Good -->
+<!-- # LH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           mapping=aes(fill=es.TD_vs_Good), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           mapping=aes(fill=es.TD_vs_Good), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+
+<!-- # CT es.TD_vs_Poor -->
+<!-- # LH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="LH") -->
+<!-- pl = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           mapping=aes(fill=es.TD_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="left") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- # RH -->
+<!-- df2use = subset(df2plot, df2plot$metric=="CT" & df2plot$hemisphere=="RH") -->
+
+<!-- pr = ggseg(.data = df2use, -->
+<!--           atlas = chenTh, -->
+<!--           mapping=aes(fill=es.TD_vs_Poor), -->
+<!--           position="stacked", -->
+<!--           colour="black", -->
+<!--           hemisphere="right") + -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits=c(-0.8,0.8)) + -->
+<!--   guides(fill = guide_colourbar(nbin = 100)) + -->
+<!--   theme(text = element_text(size=fontSize)) -->
+
+<!-- pf = (pr)/(pl) -->
+<!-- pf -->
+
+<!-- ``` -->

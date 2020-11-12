@@ -108,12 +108,12 @@ outcols = c("OR","pval","fdr")
 out_mats = vector(mode = "list", length = length(geneclasses))
 names(out_mats) = geneclasses
 for (igc in 1:length(geneclasses)){
-  out_res = data.frame(matrix(nrow = length(mod_names), 
+  out_res = data.frame(matrix(nrow = length(mod_names),
                               ncol = length(outcols)))
   colnames(out_res) = outcols
   rownames(out_res) = mod_names
 
-  # intersect genes2 list with background 
+  # intersect genes2 list with background
   genes2 = eval(as.name(geneclasses[igc]))
   mask = is.element(genes2,bglist)
   genes2 = data.frame(genes2[mask])
@@ -121,11 +121,11 @@ for (igc in 1:length(geneclasses)){
   for (imod in 1:length(mod_names)){
     # filename for module list
     genes1 = wgcna_res$geneSymbol[wgcna_res$moduleLabels==imod]
-    
+
     overlap_res = genelistOverlap(genes1,
                                   genes2,
-                                  backgroundTotal, 
-                                  print_result = FALSE, 
+                                  backgroundTotal,
+                                  print_result = FALSE,
                                   header = FALSE)
     out_res[imod,1] = overlap_res[[1]]$OR
     out_res[imod,2] = overlap_res[[1]]$hypergeo_p
@@ -146,71 +146,6 @@ out_mats[[1]]
 out_mats[[2]]
 ```
 
-<!-- # At the level of modules, test non-zero and zero modules for enrichment in broadly expressed, brain-specific modules -->
-
-<!-- ```{r, warning=FALSE, message=FALSE} -->
-<!-- # broadly expressed modules -->
-<!-- broadmods = mod_names[out_mats$BroadGenes$fdr<=fdr_thresh] -->
-
-<!-- # test enrichment between non-zero modules and broadly expressed modules -->
-<!-- overlap_res = genelistOverlap(nz_mods,  -->
-<!--                               broadmods,  -->
-<!--                               length(mod_names),  -->
-<!--                               print_result = TRUE) -->
-
-<!-- # test enrichment between zero modules and broadly expressed modules -->
-<!-- overlap_res = genelistOverlap(z_mods,  -->
-<!--                               broadmods,  -->
-<!--                               length(mod_names),  -->
-<!--                               print_result = TRUE) -->
-
-<!-- # brain expressed modules -->
-<!-- brainmods = mod_names[out_mats$BrainGenes$fdr<=fdr_thresh] -->
-
-<!-- # test enrichment between non-zero modules and brain modules -->
-<!-- overlap_res = genelistOverlap(nz_mods,  -->
-<!--                               brainmods,  -->
-<!--                               length(mod_names),  -->
-<!--                               print_result = TRUE) -->
-
-<!-- # test enrichment between zero modules and brain modules -->
-<!-- overlap_res = genelistOverlap(z_mods,  -->
-<!--                               brainmods,  -->
-<!--                               length(mod_names),  -->
-<!--                               print_result = TRUE) -->
-<!-- ``` -->
-
-<!-- # At the level of modules, test for overlap between non-zero modules across groups -->
-
-<!-- ```{r, warning=FALSE, message=FALSE} -->
-<!-- # show the ASD Poor modules -->
-<!-- asd_poor_mods = mod_names[asd_poor_mods] -->
-
-<!-- # show the ASD Good modules -->
-<!-- asd_good_mods = mod_names[asd_good_mods] -->
-
-<!-- # show the TD modules -->
-<!-- td_mods = mod_names[td_mods] -->
-
-<!-- # test overlap between ASD Poor and ASD Good -->
-<!-- overlap_res = genelistOverlap(asd_poor_mods, -->
-<!--                               asd_good_mods, -->
-<!--                               length(mod_names), -->
-<!--                               print_result = TRUE) -->
-
-<!-- # test overlap between TD and ASD Good -->
-<!-- overlap_res = genelistOverlap(td_mods, -->
-<!--                               asd_good_mods, -->
-<!--                               length(mod_names), -->
-<!--                               print_result = TRUE) -->
-
-<!-- # test overlap between TD and ASD Poor -->
-<!-- overlap_res = genelistOverlap(td_mods, -->
-<!--                               asd_poor_mods, -->
-<!--                               length(mod_names), -->
-<!--                               print_result = TRUE) -->
-<!-- ``` -->
-
 
 ## Cortical Thickness LV1
 
@@ -228,12 +163,12 @@ df2plot$modtype[c(13,2,16,21,10,7,20,12)] = "PosNonZero"
 df2plot$modtype[c(11,8,18,1)] = "NegNonZero"
 
 p1 = ggplot(data = df2plot, aes(x = Good, y = Poor))
-p1 = p1 + geom_point(data=df2plot, aes(fill=modtype), size=dotSize, colour="black", pch=21) + 
+p1 = p1 + geom_point(data=df2plot, aes(fill=modtype), size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black")
 p1 = p1 + xlab("ASD Good PLS Correlation") + ylab("ASD Poor PLS Correlation") + guides(colour=FALSE, fill=FALSE) +
   ggtitle("ASD Good vs ASD Poor") +
   scale_fill_manual(values = c("dark blue","dark red")) +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -250,10 +185,10 @@ df2plot$modtype[c(18,1)] = "NegNonZero"
 p2 = ggplot(data = df2plot, aes(x = TD, y = Poor))
 p2 = p2 + geom_point(data=df2plot, aes(fill=modtype), size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black")
-p2 = p2 + xlab("TD PLS Correlation") + ylab("ASD Poor PLS Correlation") + guides(colour=FALSE, fill=FALSE) + 
+p2 = p2 + xlab("TD PLS Correlation") + ylab("ASD Poor PLS Correlation") + guides(colour=FALSE, fill=FALSE) +
   ggtitle("TD vs ASD Poor") +
   scale_fill_manual(values = c("dark blue","dark red")) +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -270,10 +205,10 @@ df2plot$modtype[c(11,8,18,1)] = "NegNonZero"
 p3 = ggplot(data = df2plot, aes(x = TD, y = Good))
 p3 = p3 + geom_point(data=df2plot, aes(fill=modtype), size=dotSize, colour="black", pch=21) +
   geom_smooth(method=lm, colour="black")
-p3 = p3 + xlab("TD PLS Correlation") + ylab("ASD Good PLS Correlation") + guides(colour=FALSE, fill=FALSE) + 
+p3 = p3 + xlab("TD PLS Correlation") + ylab("ASD Good PLS Correlation") + guides(colour=FALSE, fill=FALSE) +
   ggtitle("TD vs ASD Good") +
   scale_fill_manual(values = c("dark blue","dark red")) +
-  theme(text = element_text(size=fontSize), 
+  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -293,15 +228,15 @@ p_final
 geneclasses = c("BroadGenesVG","BrainGenesVG")
 res_colnames = c("Non-Zero Modules","Zero Modules")
 
-ORmat = data.frame(matrix(nrow = length(geneclasses), 
+ORmat = data.frame(matrix(nrow = length(geneclasses),
                           ncol = length(res_colnames)))
-logPmat = data.frame(matrix(nrow = length(geneclasses), 
+logPmat = data.frame(matrix(nrow = length(geneclasses),
                             ncol = length(res_colnames)))
 Pmat = data.frame(matrix(nrow = length(geneclasses),
                          ncol = length(res_colnames)))
 FDRmat = data.frame(matrix(nrow = length(geneclasses),
                            ncol = length(res_colnames)))
-NOverlapmat = data.frame(matrix(nrow = length(geneclasses), 
+NOverlapmat = data.frame(matrix(nrow = length(geneclasses),
                           ncol = length(res_colnames)))
 
 colnames(ORmat) = res_colnames
@@ -320,7 +255,7 @@ for (i in 1:length(geneclasses)){
   genes2 = eval(as.name(geneclasses[i]))
   mask = is.element(genes2,bglist)
   genes2 = data.frame(genes2[mask])
-  
+
   overlap_res = genelistOverlap(nz_genes,
                                 genes2,
                                 backgroundTotal,
@@ -348,14 +283,14 @@ for (i in 1:dim(Pmat)[2]){
 zLIM = c(0,30)
 par(mar = c(6, 8.5, 3, 3))
 WGCNA::labeledHeatmap(Matrix = logPmat,
-                      xLabels = colnames(ORmat), 
+                      xLabels = colnames(ORmat),
                       yLabels = rownames(ORmat),
-                      ySymbols = NULL, 
+                      ySymbols = NULL,
                       colorLabels = FALSE,
-                      colors = WGCNA::blueWhiteRed(100), 
+                      colors = WGCNA::blueWhiteRed(100),
                       textMatrix = round(ORmat, digits = 2),
-                      setStdMargins = FALSE, 
-                      cex.text = 3, 
+                      setStdMargins = FALSE,
+                      cex.text = 3,
                       zlim = zLIM)
 
 # Enrichment Odds Ratios
@@ -457,13 +392,13 @@ geneclassnames = c("Human-Specific Prenatal",
                    "Microglia")
 
 res_colnames =  c("Non-Zero Modules","Zero Modules")
-ORmat = data.frame(matrix(nrow = length(geneclasses), 
+ORmat = data.frame(matrix(nrow = length(geneclasses),
                           ncol = length(res_colnames)))
-logPmat = data.frame(matrix(nrow = length(geneclasses), 
+logPmat = data.frame(matrix(nrow = length(geneclasses),
                             ncol = length(res_colnames)))
-Pmat = data.frame(matrix(nrow = length(geneclasses), 
+Pmat = data.frame(matrix(nrow = length(geneclasses),
                          ncol = length(res_colnames)))
-FDRmat = data.frame(matrix(nrow = length(geneclasses), 
+FDRmat = data.frame(matrix(nrow = length(geneclasses),
                            ncol = length(res_colnames)))
 colnames(ORmat) = res_colnames
 colnames(logPmat) = res_colnames
@@ -491,7 +426,7 @@ for (i in 1:length(geneclasses)){
 
   if (is.element(geneclassnames[i],c("PC1","PC2"))){
     genes2export = unique(as.character(overlap_res[[1]]$overlapping_genes))
-    write(genes2export, 
+    write(genes2export,
           file = file.path(here("results",sprintf("%s_nonzero_overlap_CTLV1.txt",geneclassnames[i]))))
   }
 
@@ -557,7 +492,7 @@ logPmat2use = logPmat[geneclassnames,]
 FDRmat2use = FDRmat[geneclassnames,]
 
 # make figure
-pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2),
          number_color = "black", fontsize_number = 12,
          show_rownames=TRUE,
          labels_col = res_colnames,
@@ -578,24 +513,24 @@ df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
 df4plot$cat = factor(df4plot$cat, levels = rev(unique(studyname)))
 
 p = ggplot(data = df4plot, aes(x = labels, y = value, fill=cat)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity") + 
-  ylab("-log10(p-value)") + 
-  xlab(" ") + 
+p = p + geom_bar(stat="identity") +
+  ylab("-log10(p-value)") +
+  xlab(" ") +
   geom_hline(yintercept = -log10(0.05)) +
-  coord_flip() #+ 
+  coord_flip() #+
   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
 p
 
 fs2use = fontSize-5
 p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity", colour="black") + 
-  ylab("-log10(p-value)") + 
-  xlab(" ") + 
+p = p + geom_bar(stat="identity", colour="black") +
+  ylab("-log10(p-value)") +
+  xlab(" ") +
   geom_hline(yintercept = -log10(0.01), linetype="dashed") +
-  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100),
                        limits = c(min(df4plot$OR),max(df4plot$OR))) +
-  ylim(0,5) + 
-  coord_flip() + 
+  ylim(0,5) +
+  coord_flip() +
   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
   theme(axis.text.x = element_text(size=fs2use),
         # axis.text.y = element_text(size=fs2use),
@@ -628,7 +563,7 @@ logPmat2use = logPmat[geneclassnames,]
 FDRmat2use = FDRmat[geneclassnames,]
 
 # make figure
-pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2),
          number_color = "black", fontsize_number = fontSize,
          show_rownames=TRUE,
          labels_col = res_colnames,
@@ -648,13 +583,13 @@ df4plot$OR = tmp$value
 df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
 
 p = ggplot(data = df4plot, aes(x = labels, y = value)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity") + 
-  ylab("-log10(p-value)") + 
-  xlab(" ") + 
+p = p + geom_bar(stat="identity") +
+  ylab("-log10(p-value)") +
+  xlab(" ") +
   geom_hline(yintercept = -log10(0.05)) +
-  coord_flip() #+ 
+  coord_flip() #+
   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
-p = p +  theme(text = element_text(size=fontSize), 
+p = p +  theme(text = element_text(size=fontSize),
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize))
 p
@@ -693,7 +628,7 @@ logPmat2use = logPmat[geneclassnames,]
 FDRmat2use = FDRmat[geneclassnames,]
 
 # make figure
-pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2),
          number_color = "black", fontsize_number = 12,
          show_rownames=TRUE,
          labels_col = res_colnames,
@@ -711,24 +646,24 @@ df4plot$OR = tmp$value
 df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
 
 p = ggplot(data = df4plot, aes(x = labels, y = value)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity") + 
-  ylab("-log10(p-value)") + 
-  xlab(" ") + 
+p = p + geom_bar(stat="identity") +
+  ylab("-log10(p-value)") +
+  xlab(" ") +
   geom_hline(yintercept = -log10(0.05)) +
-  coord_flip() #+ 
+  coord_flip() #+
   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
 p
 
 fs2use = fontSize-5
 p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity", colour="black") + 
-  ylab("-log10(p-value)") + 
-  xlab(" ") + 
+p = p + geom_bar(stat="identity", colour="black") +
+  ylab("-log10(p-value)") +
+  xlab(" ") +
   geom_hline(yintercept = -log10(0.01), linetype="dashed") +
-  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100),
                        limits = c(min(df4plot$OR),max(df4plot$OR))) +
-  ylim(0,42) + 
-  coord_flip() + 
+  ylim(0,42) +
+  coord_flip() +
   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
   theme(axis.text.x = element_text(size=fs2use),
         # axis.text.y = element_text(size=fs2use),
@@ -764,7 +699,7 @@ logPmat2use = logPmat[geneclassnames,]
 FDRmat2use = FDRmat[geneclassnames,]
 
 # make figure
-pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2),
          number_color = "black", fontsize_number = 12,
          show_rownames=TRUE,
          labels_col = res_colnames,
@@ -783,14 +718,14 @@ df4plot$OR = tmp$value
 fs2use = fontSize-5
 df4plot$labels = factor(df4plot$labels, levels = rev(geneclassnames))
 p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity", colour="black") + 
-  ylab("-log10(p-value)") + 
-  xlab(" ") + 
+p = p + geom_bar(stat="identity", colour="black") +
+  ylab("-log10(p-value)") +
+  xlab(" ") +
   geom_hline(yintercept = -log10(0.01), linetype="dashed") +
-  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100),
                        limits = c(min(df4plot$OR),max(df4plot$OR))) +
-  ylim(0,3) + 
-  coord_flip() + 
+  ylim(0,3) +
+  coord_flip() +
   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
   theme(axis.text.x = element_text(size=fs2use),
         # axis.text.y = element_text(size=fs2use),
@@ -853,7 +788,7 @@ logPmat2use = logPmat[geneclassnames,]
 FDRmat2use = FDRmat[geneclassnames,]
 
 # make figure
-pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2), 
+pheatmap(logPmat2use, display_numbers = round(ORmat2use,digits=2),
          number_color = "black", fontsize_number = 12,
          show_rownames=TRUE,
          labels_col = res_colnames,
@@ -874,21 +809,21 @@ tmp = melt(mat2use[,c("Non-Zero Modules","Zero Modules","labels")])
 df4plot$OR = tmp$value
 
 p = ggplot(data = df4plot, aes(x = labels, y = value, fill=cat)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity") + 
-  ylab("-log10(p-value)") + 
-  xlab(" ") + 
+p = p + geom_bar(stat="identity") +
+  ylab("-log10(p-value)") +
+  xlab(" ") +
   geom_hline(yintercept = -log10(0.01)) +
-  coord_flip() #+ 
+  coord_flip() #+
   # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100))
 p
 
 fs2use = fontSize-5
 p = ggplot(data = df4plot, aes(x = labels, y = value, fill=OR)) + facet_grid(. ~ variable)
-p = p + geom_bar(stat="identity", colour="black") + 
-  ylab("-log10(p-value)") + 
+p = p + geom_bar(stat="identity", colour="black") +
+  ylab("-log10(p-value)") +
   xlab(" ") + ggtitle("CT LV1") +
   geom_hline(yintercept = -log10(0.01), linetype = "dashed") +
-  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), 
+  scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100),
                        limits = c(min(df4plot$OR),max(df4plot$OR))) +
   ylim(0,30) +
   coord_flip() +
