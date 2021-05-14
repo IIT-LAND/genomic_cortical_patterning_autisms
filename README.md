@@ -26,15 +26,13 @@ The *.Rmd files explained below, show the code, and the accompanying html files 
 
 `_01_demographics.Rmd` - Runs analysis on the clinical and demographic variables.
 
-`_01_covAdj_gexData.Rmd` - Does covariate adjustment of the gene expression data. Part of this analysis requires use of the CellCODE R library found here (https://github.com/mchikina/CellCODE).
-
-`_01_covAdj_mriData_gentemp_ct.Rmd` and `_01_covAdj_mriData_gentemp_sa.Rmd` - Covariate adjustment of Freesurfer MRI features of surface area (SA) and cortical thickness (CT).
+`_01_covAdj*` - Covariate adjustment of the gene expression and MRI data.
 
 `_02_WGCNA.Rmd` - Runs the WGCNA analyses on gene expression data.
 
-`_03_batch_PLS_all_gentemp.m` - Runs the PLS analysis in MATLAB.
+`_03_batch_PLS*.m` - Runs PLS analyses in MATLAB.
 
-`_03_plotPLSbrainBSR_gradient.Rmd` - Generates plots of the BSRs from the PLS results.
+`_03_plot*` - Generates plots of PLS results.
 
 `_04_enrichmentAnalysis_sa_LV1_sexAdj_gentemp.Rmd` - Enrichment analyses on SA LV1 results.
 `_04_enrichmentAnalysis_ct_LV1_sexAdj_gentemp.Rmd` - Enrichment analyses on CT LV1 results.
