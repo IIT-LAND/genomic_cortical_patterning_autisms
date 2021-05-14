@@ -21,9 +21,488 @@ plotdir = here("plots")
 pheno_data_gex =read.csv(file.path(datapath,"labelData_allGEXMRIsubs.csv"))
 pheno_data_mri =read.csv(file.path(datapath,"labelData_all_MRI.csv"))
 
+# compute total SA and CT mean
+asd_mri = read.csv(file.path(datapath,"asd_mri_data.csv"))
+td_mri = read.csv(file.path(datapath,"td_mri_data.csv"))
+lh_sa_cols = 2:35
+rh_sa_cols = 106:139
+lh_ct_cols = 37:70
+rh_ct_cols = 141:174
+asd_mri$lh_SAtotal = rowSums(asd_mri[,lh_sa_cols])
+asd_mri$rh_SAtotal = rowSums(asd_mri[,rh_sa_cols])
+asd_mri$SAtotal = asd_mri$lh_SAtotal + asd_mri$rh_SAtotal
+asd_mri$lh_CTmean = rowMeans(asd_mri[,lh_ct_cols])
+asd_mri$rh_CTmean = rowMeans(asd_mri[,rh_ct_cols])
+asd_mri$CTmean = rowMeans(asd_mri[,c(lh_ct_cols,rh_ct_cols)])
+td_mri$lh_SAtotal = rowSums(td_mri[,lh_sa_cols])
+td_mri$rh_SAtotal = rowSums(td_mri[,rh_sa_cols])
+td_mri$SAtotal = td_mri$lh_SAtotal + td_mri$rh_SAtotal
+td_mri$lh_CTmean = rowMeans(td_mri[,lh_ct_cols])
+td_mri$rh_CTmean = rowMeans(td_mri[,rh_ct_cols])
+td_mri$CTmean = rowMeans(td_mri[,c(lh_ct_cols,rh_ct_cols)])
+all_mri = rbind(td_mri,asd_mri)
+all_mri$subjectId = factor(all_mri$X)
+
+fs_data = read.csv(file.path(datapath,"FSparc_GenTemp_all.csv"))
+fs_data$Group = factor(fs_data$Group)
+
+# region_names = colnames(fs_data)[5:ncol(fs_data)]
+# region_names = c("CortexVol","SAtotal","CTmean",region_names)
+region_names = c("CortexVol","SAtotal","CTmean")
+
+fs_data = merge(fs_data, pheno_data_mri[,c("subjectId","sex","scan_age")], by="subjectId")
+fs_data = merge(fs_data, all_mri[,c("subjectId","SAtotal","CTmean")], by="subjectId")
 
 
+#------------------------------------------------------------------------------
+# Remove the longitudinal duplicates
+dup_df = data.frame(t(table(fs_data$subjectId)))
+colnames(dup_df)[2:3] = c("subjectId","n")
+dup_subs = dup_df$subjectId[dup_df$n>1]
 
+rows2keep = numeric()
+rows2remove = numeric()
+for (isub in dup_subs){
+  dup_indx = which(fs_data$subjectId==isub)
+  rows2keep = c(rows2keep,dup_indx[1])
+  rows2remove = c(rows2remove,dup_indx[2:length(dup_indx)])
+}
+
+fs_data = fs_data[-rows2remove,] 
+#------------------------------------------------------------------------------
+
+
+new_fs_data = fs_data
+
+colnames2use = c("Fstat","pval","etasq","fdrq","es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor",
+                 "tstat.TD_vs_Good","tstat.TD_vs_Poor","tstat.Good_vs_Poor",
+                 "pval.TD_vs_Good","pval.TD_vs_Poor","pval.Good_vs_Poor")
+output_res = data.frame(matrix(nrow=length(region_names), ncol=length(colnames2use)))
+rownames(output_res) = region_names
+colnames(output_res) = colnames2use
+
+for (icol in 1:length(region_names)){
+  
+  y_var = region_names[icol]
+  
+  if(is.element(y_var,c("CortexVol","SAtotal","CTmean"))){
+    # make formula
+    form2use = as.formula(sprintf("%s ~ Group + sex + scan_age", y_var))
+    full_model = model.matrix(~0+ Group + sex + scan_age, data = fs_data)
+	  covname2use = c("sexMale","scan_age")
+  }else{
+    # make formula
+    form2use = as.formula(sprintf("%s ~ Group + CortexVol + sex + scan_age", y_var))
+    full_model = model.matrix(~0+ Group + CortexVol + sex + scan_age, data = fs_data)
+    covname2use = c("CortexVol","sexMale","scan_age")
+    # #--------------------------------------------------------------------------
+    # # remove CortexVol as covariate since GCLUST is already globally controlled for
+    # # make formula
+    # form2use = as.formula(sprintf("%s ~ Group + sex + scan_age", y_var))
+    # full_model = model.matrix(~0+ Group + sex + scan_age, data = fs_data)
+    # covname2use = c("sexMale","scan_age")
+    # #--------------------------------------------------------------------------
+  }
+  
+  # run linear model
+  mod2use = lm(formula = form2use, data = fs_data)
+  
+  # run an ANOVA
+  res2use = anova(mod2use)
+  
+  # grab ANOVA results and store into output_res
+  output_res[y_var, "Fstat"] = res2use["Group", "F value"]
+  output_res[y_var, "pval"] = res2use["Group", "Pr(>F)"]
+  
+  # compute partial eta-squared as the effect size of the interaction effect
+  eta_sq_res = etasq(mod2use)
+  output_res[icol, "etasq"] = eta_sq_res["Group","Partial eta^2"]
+  
+  
+	# remove covariates before effect size computation
+	beta1 = mod2use$coefficients[covname2use, drop = FALSE]
+	beta1[is.na(beta1)] = 0
+
+	new_fs_data[,y_var] = as.numeric(t(fs_data[,y_var] - beta1 %*% t(full_model[,covname2use])))
+	
+	# compute effect sizes
+	mask1 = fs_data$Group=="Good"
+	mask2 = fs_data$Group=="TD"
+	output_res[y_var, "es.TD_vs_Good"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
+	
+	d2use = subset(fs_data, mask1 | mask2)
+  mod2use = lm(formula = form2use, data = d2use)
+  res = summary(mod2use)
+	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"] 
+	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"] 
+	
+	mask1 = fs_data$Group=="Poor"
+	mask2 = fs_data$Group=="TD"
+	output_res[y_var, "es.TD_vs_Poor"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
+	
+	d2use = subset(fs_data, mask1 | mask2)
+  mod2use = lm(formula = form2use, data = d2use)
+  res = summary(mod2use)
+	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"] 
+	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
+
+
+	mask1 = fs_data$Group=="Good"
+	mask2 = fs_data$Group=="Poor"
+	output_res[y_var, "es.Good_vs_Poor"] = cohens_d(new_fs_data[mask1,y_var], new_fs_data[mask2,y_var])
+
+	d2use = subset(fs_data, mask1 | mask2)
+  mod2use = lm(formula = form2use, data = d2use)
+  res = summary(mod2use)
+	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"] 
+	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
+
+}
+
+output_res$fdrq = p.adjust(output_res$pval, method = "fdr")
+output_res$fdrq.TD_vs_Good = p.adjust(output_res$pval.TD_vs_Good, method = "fdr")
+output_res$fdrq.TD_vs_Poor = p.adjust(output_res$pval.TD_vs_Poor, method = "fdr")
+output_res$fdrq.Good_vs_Poor = p.adjust(output_res$pval.Good_vs_Poor, method = "fdr")
+output_res[order(output_res$pval),]
+```
+
+<!-- ```{r, warning=FALSE, message=FALSE} -->
+<!-- regions2use = colnames(fs_data)[5:(ncol(fs_data)-4)] -->
+<!-- full_regnames = c("motor-premotor","occipital","posterolateral temporal","superior parietal", -->
+<!--                   "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal", -->
+<!--                   "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral", -->
+<!--                   "motor-premotor","occipital","posterolateral temporal","superior parietal", -->
+<!--                   "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal", -->
+<!--                   "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral", -->
+<!--                   "motor-premotor-supplementary motor area","ventral frontal","ventromedial occipital","inferior parietal", -->
+<!--                   "middle temporal","perisylvian","dorsolateral prefrontal","occipital", -->
+<!--                   "temporal pole","superior parietal","medial prefrontal","medial temporal", -->
+<!--                   "motor-premotor-supplementary motor area","ventral frontal","ventromedial occipital","inferior parietal", -->
+<!--                   "middle temporal","perisylvian","dorsolateral prefrontal","occipital", -->
+<!--                   "temporal pole","superior parietal","medial prefrontal","medial temporal") -->
+
+<!-- sa_ordering = c(1,12,7,10, -->
+<!--                 4,6,9,3, -->
+<!--                 8,11,2,5) -->
+<!-- ct_ordering = c(1,7,6,3, -->
+<!--                 10,4,11,5, -->
+<!--                 8,2,12,9) -->
+<!-- gensim_order = c(sa_ordering,sa_ordering, ct_ordering,ct_ordering) -->
+
+<!-- df4plot = output_res[regions2use,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")] -->
+<!-- df4plot$phenotype = "CT" -->
+<!-- df4plot$phenotype[1:24] = "SA" -->
+<!-- df4plot$phenotype = factor(df4plot$phenotype)  -->
+
+<!-- df4plot$hemisphere = "RH" -->
+<!-- df4plot$hemisphere[1:12] = "LH" -->
+<!-- df4plot$hemisphere[25:36] = "LH" -->
+<!-- df4plot$hemisphere = factor(df4plot$hemisphere)  -->
+
+<!-- df4plot$full_region_names = factor(full_regnames) -->
+<!-- df4plot$gensim_gradient = gensim_order -->
+
+<!-- ct_df = subset(df4plot, df4plot$phenotype=="CT") -->
+<!-- sa_df = subset(df4plot, df4plot$phenotype=="SA") -->
+
+<!-- ct_df$cluster = "dorsal" -->
+<!-- ct_df$cluster[c(6,7,8,9,10,11,12)] = "ventral" -->
+<!-- ct_df$cluster = factor(ct_df$cluster) -->
+
+<!-- sa_df$cluster = "anterior" -->
+<!-- sa_df$cluster[c(6,7,8,9,10,11,12)] = "posterior" -->
+<!-- sa_df$cluster = factor(sa_df$cluster) -->
+
+<!-- dotSize = 10 -->
+<!-- fontSize = 18 -->
+
+<!-- p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) +  -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) +  -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Brain Region") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("CT TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"geneSimGradient_TD_vs_ASDGood_CT_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Good) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +  -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +  -->
+<!--   scale_fill_manual(values = c("blue","red")) +  -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Clusters") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"dvGradient_TD_vs_ASDGood_CT_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Good ~ cluster, data = ct_df) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) +  -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) +  -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Brain Region") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("CT TD vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"geneSimGradient_TD_vs_ASDPoor_CT_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Poor) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +  -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +  -->
+<!--   scale_fill_manual(values = c("blue","red")) +  -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Clusters") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("Dorsal-Ventral Clusters TD vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"dvGradient_TD_vs_ASDPoor_CT_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Poor ~ cluster, data = ct_df) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) +  -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Brain Region") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("CT ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"geneSimGradient_ASDGood_vs_ASDPoor_CT_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- cor.test(ct_df$gensim_gradient, ct_df$es.Good_vs_Poor) -->
+
+<!-- p = ggplot(data = ct_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +  -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +  -->
+<!--   scale_fill_manual(values = c("blue","red")) +  -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Clusters") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("Dorsal-Ventral Clusters ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"dvGradient_ASDGood_vs_ASDPoor_CT_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- t.test(es.Good_vs_Poor ~ cluster, data = ct_df) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) +  -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) +  -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Brain Region") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("SA TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"geneSimGradient_TD_vs_ASDGood_SA_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Good) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +  -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +  -->
+<!--   scale_fill_manual(values = c("blue","red")) +  -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Clusters") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("Anterior-Posterior Clusters TD vs ASD Good") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"apGradient_TD_vs_ASDGood_SA_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Good ~ cluster, data = sa_df) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) + -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) +  -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Brain Region") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("SA TD vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"geneSimGradient_TD_vs_ASDPoor_SA_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Poor) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +  -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +  -->
+<!--   scale_fill_manual(values = c("blue","red")) +  -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Clusters") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("Anterior-Posterior Clusters TD vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"apGradient_TD_vs_ASDPoor_SA_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- t.test(es.TD_vs_Poor ~ cluster, data = sa_df) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) +  -->
+<!--   geom_point(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_smooth(method=lm, colour="black") + xlim(0,12) + -->
+<!--   scale_x_continuous(breaks=seq(1,12,1)) +  -->
+<!--   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) + -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Brain Region") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("SA ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"geneSimGradient_ASDGood_vs_ASDPoor_SA_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- cor.test(sa_df$gensim_gradient, sa_df$es.Good_vs_Poor) -->
+
+<!-- p = ggplot(data = sa_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster)) -->
+<!-- p = p + geom_jitter(size=dotSize, colour="black", pch=21) +  -->
+<!--   geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +  -->
+<!--   # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +  -->
+<!--   scale_fill_manual(values = c("blue","red")) +  -->
+<!--   guides(colour=FALSE, fill=FALSE) +   -->
+<!--   xlab("Clusters") +  -->
+<!--   ylab("Effect Size (Cohen's d)") +  -->
+<!--   ggtitle("Anterior-Posterior Clusters ASD Good vs ASD Poor") + -->
+<!--   theme(text = element_text(size=fontSize),  -->
+<!--         axis.text.x = element_text(size=fontSize), -->
+<!--         axis.text.y = element_text(size=fontSize), -->
+<!--         plot.title = element_text(size=fontSize,hjust=0.5)) -->
+<!-- ggsave(filename = file.path(plotdir,"apGradient_ASDGood_vs_ASDPoor_SA_effectSize.pdf")) -->
+<!-- p -->
+
+<!-- t.test(es.Good_vs_Poor ~ cluster, data = sa_df) -->
+<!-- ``` -->
+
+# Make plots of total cortical volume, surface area, and mean cortical thickness
+
+```{r, warning=FALSE, message=FALSE}
+dotSize = 6
+fontSize=28
+
+fdr_thresh = 0.05
+output_res_fdr = output_res[output_res$fdrq<=fdr_thresh,]
+output_res_fdr[order(output_res_fdr$pval),]
+
+# Plot Total Cortical Volume
+cols2use = c("#3d3d3d","#828282","#b3b3b3")
+region = "CortexVol"
+reg_name = "Total Cortical Volume"
+metric_name = "Volume"
+ylims = c(450000,700000)
+p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
+p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + 
+  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + 
+  theme(text = element_text(size=fontSize),
+      axis.text.x = element_text(size=fontSize),
+      axis.text.y = element_text(size=fontSize),
+      plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = here("plots","TotalCorticalVolume.pdf"))
+p1
+
+
+# Plot Total Surface Area
+cols2use = c("#3d3d3d","#828282","#b3b3b3")
+region = "SAtotal"
+reg_name = "Total Surface Area"
+metric_name = "SA"
+ylims = c(90000,220000)
+p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
+p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + 
+  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + 
+  theme(text = element_text(size=fontSize),
+      axis.text.x = element_text(size=fontSize),
+      axis.text.y = element_text(size=fontSize),
+      plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = here("plots","TotalSurfaceArea.pdf"))
+p1
+
+# Plot Mean Cortical Thickness
+cols2use = c("#3d3d3d","#828282","#b3b3b3")
+region = "CTmean"
+reg_name = "Mean Cortical Thickness"
+metric_name = "CT"
+ylims = c(2.75,3.75)
+p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
+p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
+  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) + 
+  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) + 
+  theme(text = element_text(size=fontSize),
+      axis.text.x = element_text(size=fontSize),
+      axis.text.y = element_text(size=fontSize),
+      plot.title = element_text(size=fontSize,hjust=0.5))
+ggsave(filename = here("plots","MeanCorticalThickness.pdf"),width=7,height=5)
+p1
+```
+
+
+## Do modeling of local differences without adjustment for total cortical volume because GCLUST is already globally corrected.
+
+```{r, warning=FALSE, message=FALSE}
 # compute total SA and CT mean
 asd_mri = read.csv(file.path(datapath,"asd_mri_data.csv"))
 td_mri = read.csv(file.path(datapath,"td_mri_data.csv"))
@@ -50,14 +529,13 @@ fs_data = read.csv(file.path(datapath,"FSparc_GenTemp_all.csv"))
 fs_data$Group = factor(fs_data$Group)
 
 region_names = colnames(fs_data)[5:ncol(fs_data)]
-region_names = c("CortexVol","SAtotal","CTmean",region_names)
+# region_names = c("CortexVol","SAtotal","CTmean",region_names)
 
 fs_data = merge(fs_data, pheno_data_mri[,c("subjectId","sex","scan_age")], by="subjectId")
 fs_data = merge(fs_data, all_mri[,c("subjectId","SAtotal","CTmean")], by="subjectId")
 
-
 #------------------------------------------------------------------------------
-# Remove the longitudinal duplicates
+# Remove duplicates
 dup_df = data.frame(t(table(fs_data$subjectId)))
 colnames(dup_df)[2:3] = c("subjectId","n")
 dup_subs = dup_df$subjectId[dup_df$n>1]
@@ -70,7 +548,7 @@ for (isub in dup_subs){
   rows2remove = c(rows2remove,dup_indx[2:length(dup_indx)])
 }
 
-fs_data = fs_data[-rows2remove,]
+fs_data = fs_data[-rows2remove,] 
 #------------------------------------------------------------------------------
 
 
@@ -84,62 +562,55 @@ rownames(output_res) = region_names
 colnames(output_res) = colnames2use
 
 for (icol in 1:length(region_names)){
-
+  
   y_var = region_names[icol]
-
-  if(is.element(y_var,c("CortexVol","SAtotal","CTmean"))){
-    # make formula
-    form2use = as.formula(sprintf("%s ~ Group + sex + scan_age", y_var))
-    full_model = model.matrix(~0+ Group + sex + scan_age, data = fs_data)
-	  covname2use = c("sexMale","scan_age")
-  }else{
-    # make formula
-    form2use = as.formula(sprintf("%s ~ Group + CortexVol + sex + scan_age", y_var))
-    full_model = model.matrix(~0+ Group + CortexVol + sex + scan_age, data = fs_data)
-    covname2use = c("CortexVol","sexMale","scan_age")
-  }
+  
+  # make formula
+  form2use = as.formula(sprintf("%s ~ Group + sex + scan_age", y_var))
+  full_model = model.matrix(~0+ Group + sex + scan_age, data = fs_data)
+  covname2use = c("sexMale","scan_age")
 
   # run linear model
   mod2use = lm(formula = form2use, data = fs_data)
-
+  
   # run an ANOVA
   res2use = anova(mod2use)
-
+  
   # grab ANOVA results and store into output_res
   output_res[y_var, "Fstat"] = res2use["Group", "F value"]
   output_res[y_var, "pval"] = res2use["Group", "Pr(>F)"]
-
+  
   # compute partial eta-squared as the effect size of the interaction effect
   eta_sq_res = etasq(mod2use)
   output_res[icol, "etasq"] = eta_sq_res["Group","Partial eta^2"]
-
-
+  
+  
 	# remove covariates before effect size computation
 	beta1 = mod2use$coefficients[covname2use, drop = FALSE]
 	beta1[is.na(beta1)] = 0
 
 	new_fs_data[,y_var] = as.numeric(t(fs_data[,y_var] - beta1 %*% t(full_model[,covname2use])))
-
+	
 	# compute effect sizes
 	mask1 = fs_data$Group=="Good"
 	mask2 = fs_data$Group=="TD"
 	output_res[y_var, "es.TD_vs_Good"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-
+	
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"]
-	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"]
-
+	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"] 
+	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"] 
+	
 	mask1 = fs_data$Group=="Poor"
 	mask2 = fs_data$Group=="TD"
 	output_res[y_var, "es.TD_vs_Poor"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-
+	
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"]
-	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
+	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"] 
+	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
 
 
 	mask1 = fs_data$Group=="Good"
@@ -149,8 +620,8 @@ for (icol in 1:length(region_names)){
 	d2use = subset(fs_data, mask1 | mask2)
   mod2use = lm(formula = form2use, data = d2use)
   res = summary(mod2use)
-	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"]
-	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
+	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"] 
+	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"] 
 
 }
 
@@ -158,8 +629,348 @@ output_res$fdrq = p.adjust(output_res$pval, method = "fdr")
 output_res$fdrq.TD_vs_Good = p.adjust(output_res$pval.TD_vs_Good, method = "fdr")
 output_res$fdrq.TD_vs_Poor = p.adjust(output_res$pval.TD_vs_Poor, method = "fdr")
 output_res$fdrq.Good_vs_Poor = p.adjust(output_res$pval.Good_vs_Poor, method = "fdr")
+write.csv(output_res, file = here("results","GCLUST_regional_group_differences_stats.csv"))
 output_res[order(output_res$pval),]
 ```
+# Make effect size maps
+
+```{r, warning=FALSE, message=FALSE}
+dotSize = 6
+fontSize=28
+
+fdr_thresh = 0.05
+# output_res_fdr = output_res[output_res$fdrq<=fdr_thresh,]
+# output_res_fdr[order(output_res_fdr$pval),]
+
+#------------------------------------------------------------------------------
+# df2plot = output_res[4:nrow(output_res),]
+df2plot = output_res
+df2plot$region = rownames(df2plot)
+new_region_labels = c("motor-premotor","occipital","posterolateral temporal","superior parietal",
+                      "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
+                      "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
+                      "motor-premotor","occipital","posterolateral temporal","superior parietal",
+                      "orbitofrontal","superior temporal","inferior parietal","dorsomedial frontal",
+                      "anteromedial temporal","precuneus","dorsolateral prefrontal","pars opercularis,subcentral",
+                      "motor-premotor-supplementary motor area","ventral frontal",
+                      "ventromedial occipital","inferior parietal","middle temporal","perisylvian",
+                      "dorsolateral prefrontal","occipital","temporal pole","superior parietal",
+                      "medial prefrontal","medial temporal",
+                      "motor-premotor-supplementary motor area","ventral frontal",
+                      "ventromedial occipital","inferior parietal","middle temporal","perisylvian",
+                      "dorsolateral prefrontal","occipital","temporal pole","superior parietal",
+                      "medial prefrontal","medial temporal")
+hemi_labels = c("LH","LH","LH","LH",
+                      "LH","LH","LH","LH",
+                      "LH","LH","LH","LH",
+                      "RH","RH","RH","RH",
+                      "RH","RH","RH","RH",
+                      "RH","RH","RH","RH",
+                      "LH","LH","LH","LH",
+                      "LH","LH","LH","LH",
+                      "LH","LH","LH","LH",
+                      "RH","RH","RH","RH",
+                      "RH","RH","RH","RH",
+                      "RH","RH","RH","RH")
+metric_labels = c("SA","SA","SA","SA",
+                  "SA","SA","SA","SA",
+                  "SA","SA","SA","SA",
+                  "SA","SA","SA","SA",
+                  "SA","SA","SA","SA",
+                  "SA","SA","SA","SA",
+                  "CT","CT","CT","CT",
+                  "CT","CT","CT","CT",
+                  "CT","CT","CT","CT",
+                  "CT","CT","CT","CT",
+                  "CT","CT","CT","CT",
+                  "CT","CT","CT","CT")
+
+df2plot$region = new_region_labels
+df2plot$hemisphere = hemi_labels
+df2plot$metric = metric_labels
+
+colors2use = get_ggColorHue(7)
+
+#------------------------------------------------------------------------------
+# Surface Area TD vs ASD Good Effect size maps
+# LH
+# df2use = subset(d2plot, d2plot$hemisphere=="LH")
+df2use = subset(df2plot, df2plot$hemisphere=="LH" & df2plot$metric=="SA")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pl = ggseg(.data = df2use,
+          atlas = chenAr,
+          mapping=aes(fill=es.TD_vs_Good),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="left") +
+  # scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+# RH
+# df2use = subset(d2plot, d2plot$hemisphere=="RH")
+df2use = subset(df2plot, df2plot$hemisphere=="RH" & df2plot$metric=="SA")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pr = ggseg(.data = df2use,
+          atlas = chenAr,
+          mapping=aes(fill=es.TD_vs_Good),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="right") +
+  # scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+pf = (pr)/(pl)
+ggsave(filename = file.path(plotdir, "SA_TD_vs_ASDGood_effectSizeMaps.pdf"), plot = pf)
+pf
+
+#------------------------------------------------------------------------------
+# Surface Area TD vs ASD Poor Effect size maps
+# LH
+# df2use = subset(d2plot, d2plot$hemisphere=="LH")
+df2use = subset(df2plot, df2plot$hemisphere=="LH" & df2plot$metric=="SA")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pl = ggseg(.data = df2use,
+          atlas = chenAr,
+          mapping=aes(fill=es.TD_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="left") +
+  # scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+# RH
+# df2use = subset(d2plot, d2plot$hemisphere=="RH")
+df2use = subset(df2plot, df2plot$hemisphere=="RH" & df2plot$metric=="SA")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pr = ggseg(.data = df2use,
+          atlas = chenAr,
+          mapping=aes(fill=es.TD_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="right") +
+  # scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+pf = (pr)/(pl)
+ggsave(filename = file.path(plotdir, "SA_TD_vs_ASDPoor_effectSizeMaps.pdf"), plot = pf)
+pf
+
+#------------------------------------------------------------------------------
+# Surface Area ASD Good vs ASD Poor Effect size maps
+# LH
+# df2use = subset(d2plot, d2plot$hemisphere=="LH")
+df2use = subset(df2plot, df2plot$hemisphere=="LH" & df2plot$metric=="SA")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pl = ggseg(.data = df2use,
+          atlas = chenAr,
+          mapping=aes(fill=es.Good_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="left") +
+  # scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+# RH
+# df2use = subset(d2plot, d2plot$hemisphere=="RH")
+df2use = subset(df2plot, df2plot$hemisphere=="RH" & df2plot$metric=="SA")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pr = ggseg(.data = df2use,
+          atlas = chenAr,
+          mapping=aes(fill=es.Good_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="right") +
+  # scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+pf = (pr)/(pl)
+ggsave(filename = file.path(plotdir, "SA_ASDGood_vs_ASDPoor_effectSizeMaps.pdf"), plot = pf)
+pf
+
+
+
+#------------------------------------------------------------------------------
+# Cortical Thickness TD vs ASD Good Effect size maps
+# LH
+# df2use = subset(d2plot, d2plot$hemisphere=="LH")
+df2use = subset(df2plot, df2plot$hemisphere=="LH" & df2plot$metric=="CT")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pl = ggseg(.data = df2use,
+          atlas = chenTh,
+          mapping=aes(fill=es.TD_vs_Good),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="left") +
+  # scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+# RH
+# df2use = subset(d2plot, d2plot$hemisphere=="RH")
+df2use = subset(df2plot, df2plot$hemisphere=="RH" & df2plot$metric=="CT")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pr = ggseg(.data = df2use,
+          atlas = chenTh,
+          mapping=aes(fill=es.TD_vs_Good),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="right") +
+  # scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+pf = (pr)/(pl)
+ggsave(filename = file.path(plotdir, "CT_TD_vs_ASDGood_effectSizeMaps.pdf"), plot = pf)
+pf
+
+#------------------------------------------------------------------------------
+# Cortical Thickness TD vs ASD Poor Effect size maps
+# LH
+# df2use = subset(d2plot, d2plot$hemisphere=="LH")
+df2use = subset(df2plot, df2plot$hemisphere=="LH" & df2plot$metric=="CT")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pl = ggseg(.data = df2use,
+          atlas = chenTh,
+          mapping=aes(fill=es.TD_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="left") +
+  # scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+# RH
+# df2use = subset(d2plot, d2plot$hemisphere=="RH")
+df2use = subset(df2plot, df2plot$hemisphere=="RH" & df2plot$metric=="CT")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pr = ggseg(.data = df2use,
+          atlas = chenTh,
+          mapping=aes(fill=es.TD_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="right") +
+  # scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+pf = (pr)/(pl)
+ggsave(filename = file.path(plotdir, "CT_TD_vs_ASDPoor_effectSizeMaps.pdf"), plot = pf)
+pf
+
+#------------------------------------------------------------------------------
+# Cortical Thickness ASD Good vs ASD Poor Effect size maps
+# LH
+# df2use = subset(d2plot, d2plot$hemisphere=="LH")
+df2use = subset(df2plot, df2plot$hemisphere=="LH" & df2plot$metric=="CT")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pl = ggseg(.data = df2use,
+          atlas = chenTh,
+          mapping=aes(fill=es.Good_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="left") +
+  # scale_fill_manual(values = colors2use[1:3]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+# RH
+# df2use = subset(d2plot, d2plot$hemisphere=="RH")
+df2use = subset(df2plot, df2plot$hemisphere=="RH" & df2plot$metric=="CT")
+df2use$label2fill = factor(c(1:dim(df2use)[1]))
+
+pr = ggseg(.data = df2use,
+          atlas = chenTh,
+          mapping=aes(fill=es.Good_vs_Poor),
+          # mapping=aes(fill=Fstat),
+          # mapping=aes(fill=label2fill),
+          position="stacked",
+          colour="black",
+          hemisphere="right") +
+  # scale_fill_manual(values = colors2use[4:7]) + guides(fill=FALSE) +
+  # scale_fill_gradientn(colors = colorRampPalette(c("white","red"))(100), limits = c(0,15)) +
+  scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100), limits = c(-0.7,0.7)) +
+  # guides(fill = guide_colourbar(nbin = 100)) +
+  guides(fill=guide_legend(title="Effect Size")) +
+  theme(text = element_text(size=fontSize))
+
+pf = (pr)/(pl)
+ggsave(filename = file.path(plotdir, "CT_ASDGood_vs_ASDPoor_effectSizeMaps.pdf"), plot = pf)
+pf
+```
+
+# Make A-P and D-V and Effect Size Gradient Plots
 
 ```{r, warning=FALSE, message=FALSE}
 regions2use = colnames(fs_data)[5:(ncol(fs_data)-4)]
@@ -187,12 +998,12 @@ gensim_order = c(sa_ordering,sa_ordering, ct_ordering,ct_ordering)
 df4plot = output_res[regions2use,c("es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor")]
 df4plot$phenotype = "CT"
 df4plot$phenotype[1:24] = "SA"
-df4plot$phenotype = factor(df4plot$phenotype)
+df4plot$phenotype = factor(df4plot$phenotype) 
 
 df4plot$hemisphere = "RH"
 df4plot$hemisphere[1:12] = "LH"
 df4plot$hemisphere[25:36] = "LH"
-df4plot$hemisphere = factor(df4plot$hemisphere)
+df4plot$hemisphere = factor(df4plot$hemisphere) 
 
 df4plot$full_region_names = factor(full_regnames)
 df4plot$gensim_gradient = gensim_order
@@ -211,16 +1022,16 @@ sa_df$cluster = factor(sa_df$cluster)
 dotSize = 10
 fontSize = 18
 
-p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) +
-  geom_point(size=dotSize, colour="black", pch=21) +
+p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + 
+  geom_point(size=dotSize, colour="black", pch=21) + 
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Brain Region") +
-  ylab("Effect Size (Cohen's d)") +
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Brain Region") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("CT TD vs ASD Good") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -230,15 +1041,15 @@ p
 cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Good)
 
 p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
-  scale_fill_manual(values = c("blue","red")) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Clusters") +
-  ylab("Effect Size (Cohen's d)") +
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("Dorsal-Ventral Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -247,16 +1058,16 @@ p
 
 t.test(es.TD_vs_Good ~ cluster, data = ct_df)
 
-p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) +
+p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) + 
+  geom_point(size=dotSize, colour="black", pch=21) + 
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Brain Region") +
-  ylab("Effect Size (Cohen's d)") +
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Brain Region") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("CT TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -266,15 +1077,15 @@ p
 cor.test(ct_df$gensim_gradient, ct_df$es.TD_vs_Poor)
 
 p = ggplot(data = ct_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
-  scale_fill_manual(values = c("blue","red")) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Clusters") +
-  ylab("Effect Size (Cohen's d)") +
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("Dorsal-Ventral Clusters TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -284,15 +1095,15 @@ p
 t.test(es.TD_vs_Poor ~ cluster, data = ct_df)
 
 p = ggplot(data = ct_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) +
+  geom_point(size=dotSize, colour="black", pch=21) + 
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Brain Region") +
-  ylab("Effect Size (Cohen's d)") +
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Brain Region") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("CT ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -302,15 +1113,15 @@ p
 cor.test(ct_df$gensim_gradient, ct_df$es.Good_vs_Poor)
 
 p = ggplot(data = ct_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
-  scale_fill_manual(values = c("blue","red")) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Clusters") +
-  ylab("Effect Size (Cohen's d)") +
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("Dorsal-Ventral Clusters ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -319,16 +1130,16 @@ p
 
 t.test(es.Good_vs_Poor ~ cluster, data = ct_df)
 
-p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) +
-  geom_point(size=dotSize, colour="black", pch=21) +
+p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Good, fill = es.TD_vs_Good)) + 
+  geom_point(size=dotSize, colour="black", pch=21) + 
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Brain Region") +
-  ylab("Effect Size (Cohen's d)") +
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Brain Region") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("SA TD vs ASD Good") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -338,15 +1149,15 @@ p
 cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Good)
 
 p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Good, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
-  scale_fill_manual(values = c("blue","red")) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Clusters") +
-  ylab("Effect Size (Cohen's d)") +
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("Anterior-Posterior Clusters TD vs ASD Good") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -356,15 +1167,15 @@ p
 t.test(es.TD_vs_Good ~ cluster, data = sa_df)
 
 p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.TD_vs_Poor, fill = es.TD_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) +
+  geom_point(size=dotSize, colour="black", pch=21) + 
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Brain Region") +
-  ylab("Effect Size (Cohen's d)") +
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Brain Region") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("SA TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -374,15 +1185,15 @@ p
 cor.test(sa_df$gensim_gradient, sa_df$es.TD_vs_Poor)
 
 p = ggplot(data = sa_df, aes(x = cluster, y = es.TD_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
-  scale_fill_manual(values = c("blue","red")) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Clusters") +
-  ylab("Effect Size (Cohen's d)") +
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("Anterior-Posterior Clusters TD vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -391,16 +1202,16 @@ p
 
 t.test(es.TD_vs_Poor ~ cluster, data = sa_df)
 
-p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) +
-  geom_point(size=dotSize, colour="black", pch=21) +
+p = ggplot(data = sa_df, aes(x = gensim_gradient, y = es.Good_vs_Poor, fill = es.Good_vs_Poor)) + 
+  geom_point(size=dotSize, colour="black", pch=21) + 
   geom_smooth(method=lm, colour="black") + xlim(0,12) +
-  scale_x_continuous(breaks=seq(1,12,1)) +
+  scale_x_continuous(breaks=seq(1,12,1)) + 
   scale_fill_gradientn(colors = colorRampPalette(c("blue","white","red"))(100)) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Brain Region") +
-  ylab("Effect Size (Cohen's d)") +
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Brain Region") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("SA ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -410,15 +1221,15 @@ p
 cor.test(sa_df$gensim_gradient, sa_df$es.Good_vs_Poor)
 
 p = ggplot(data = sa_df, aes(x = cluster, y = es.Good_vs_Poor, fill=cluster))
-p = p + geom_jitter(size=dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) +
-  scale_fill_manual(values = c("blue","red")) +
-  guides(colour=FALSE, fill=FALSE) +
-  xlab("Clusters") +
-  ylab("Effect Size (Cohen's d)") +
+p = p + geom_jitter(size=dotSize, colour="black", pch=21) + 
+  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) + 
+  # scale_fill_manual(values = c("#1e90ff","#ff8d1e")) + 
+  scale_fill_manual(values = c("blue","red")) + 
+  guides(colour=FALSE, fill=FALSE) +  
+  xlab("Clusters") + 
+  ylab("Effect Size (Cohen's d)") + 
   ggtitle("Anterior-Posterior Clusters ASD Good vs ASD Poor") +
-  theme(text = element_text(size=fontSize),
+  theme(text = element_text(size=fontSize), 
         axis.text.x = element_text(size=fontSize),
         axis.text.y = element_text(size=fontSize),
         plot.title = element_text(size=fontSize,hjust=0.5))
@@ -427,186 +1238,6 @@ p
 
 t.test(es.Good_vs_Poor ~ cluster, data = sa_df)
 ```
-
-```{r, warning=FALSE, message=FALSE}
-dotSize = 6
-fontSize=28
-
-fdr_thresh = 0.05
-output_res_fdr = output_res[output_res$fdrq<=fdr_thresh,]
-output_res_fdr[order(output_res_fdr$pval),]
-
-
-# Plot Total Cortical Volume
-cols2use = c("#3d3d3d","#828282","#b3b3b3")
-region = "CortexVol"
-reg_name = "Total Cortical Volume"
-metric_name = "Volume"
-ylims = c(450000,700000)
-p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
-p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) +
-  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) +
-  theme(text = element_text(size=fontSize),
-      axis.text.x = element_text(size=fontSize),
-      axis.text.y = element_text(size=fontSize),
-      plot.title = element_text(size=fontSize,hjust=0.5))
-ggsave(filename = here("plots","TotalCorticalVolume.pdf"))
-p1
-
-
-# Plot Total Surface Area
-cols2use = c("#3d3d3d","#828282","#b3b3b3")
-region = "SAtotal"
-reg_name = "Total Surface Area"
-metric_name = "SA"
-ylims = c(90000,220000)
-p1 = ggplot(data = fs_data, aes_string(x = "Group", y = region, fill = "Group"))
-p1 = p1 + geom_jitter(size = dotSize, colour="black", pch=21) +
-  geom_boxplot(fill = NA, colour = "#000000", outlier.shape = NA) +
-  scale_fill_manual(values=cols2use) + guides(colour = FALSE, fill = FALSE) +
-  xlab("Group") + ylab(metric_name) + ggtitle(reg_name) + ylim(ylims) +
-  theme(text = element_text(size=fontSize),
-      axis.text.x = element_text(size=fontSize),
-      axis.text.y = element_text(size=fontSize),
-      plot.title = element_text(size=fontSize,hjust=0.5))
-ggsave(filename = here("plots","TotalSurfaceArea.pdf"))
-p1
-```
-
-
-## Do modeling of local differences without adjustment for total cortical volume.
-
-```{r, warning=FALSE, message=FALSE}
-# compute total SA and CT mean
-asd_mri = read.csv(file.path(datapath,"asd_mri_data.csv"))
-td_mri = read.csv(file.path(datapath,"td_mri_data.csv"))
-lh_sa_cols = 2:35
-rh_sa_cols = 106:139
-lh_ct_cols = 37:70
-rh_ct_cols = 141:174
-asd_mri$lh_SAtotal = rowSums(asd_mri[,lh_sa_cols])
-asd_mri$rh_SAtotal = rowSums(asd_mri[,rh_sa_cols])
-asd_mri$SAtotal = asd_mri$lh_SAtotal + asd_mri$rh_SAtotal
-asd_mri$lh_CTmean = rowMeans(asd_mri[,lh_ct_cols])
-asd_mri$rh_CTmean = rowMeans(asd_mri[,rh_ct_cols])
-asd_mri$CTmean = rowMeans(asd_mri[,c(lh_ct_cols,rh_ct_cols)])
-td_mri$lh_SAtotal = rowSums(td_mri[,lh_sa_cols])
-td_mri$rh_SAtotal = rowSums(td_mri[,rh_sa_cols])
-td_mri$SAtotal = td_mri$lh_SAtotal + td_mri$rh_SAtotal
-td_mri$lh_CTmean = rowMeans(td_mri[,lh_ct_cols])
-td_mri$rh_CTmean = rowMeans(td_mri[,rh_ct_cols])
-td_mri$CTmean = rowMeans(td_mri[,c(lh_ct_cols,rh_ct_cols)])
-all_mri = rbind(td_mri,asd_mri)
-all_mri$subjectId = factor(all_mri$X)
-
-fs_data = read.csv(file.path(datapath,"FSparc_GenTemp_all.csv"))
-fs_data$Group = factor(fs_data$Group)
-region_names = colnames(fs_data)[5:ncol(fs_data)]
-region_names = c("CortexVol","SAtotal","CTmean",region_names)
-
-fs_data = merge(fs_data, pheno_data_mri[,c("subjectId","sex","scan_age")], by="subjectId")
-fs_data = merge(fs_data, all_mri[,c("subjectId","SAtotal","CTmean")], by="subjectId")
-
-#------------------------------------------------------------------------------
-# Remove duplicates
-dup_df = data.frame(t(table(fs_data$subjectId)))
-colnames(dup_df)[2:3] = c("subjectId","n")
-dup_subs = dup_df$subjectId[dup_df$n>1]
-
-rows2keep = numeric()
-rows2remove = numeric()
-for (isub in dup_subs){
-  dup_indx = which(fs_data$subjectId==isub)
-  rows2keep = c(rows2keep,dup_indx[1])
-  rows2remove = c(rows2remove,dup_indx[2:length(dup_indx)])
-}
-
-fs_data = fs_data[-rows2remove,]
-#------------------------------------------------------------------------------
-
-
-new_fs_data = fs_data
-
-colnames2use = c("Fstat","pval","etasq","fdrq","es.TD_vs_Good","es.TD_vs_Poor","es.Good_vs_Poor",
-                 "tstat.TD_vs_Good","tstat.TD_vs_Poor","tstat.Good_vs_Poor",
-                 "pval.TD_vs_Good","pval.TD_vs_Poor","pval.Good_vs_Poor")
-output_res = data.frame(matrix(nrow=length(region_names), ncol=length(colnames2use)))
-rownames(output_res) = region_names
-colnames(output_res) = colnames2use
-
-for (icol in 1:length(region_names)){
-
-  y_var = region_names[icol]
-
-  # make formula
-  form2use = as.formula(sprintf("%s ~ Group + sex + scan_age", y_var))
-  full_model = model.matrix(~0+ Group + sex + scan_age, data = fs_data)
-  covname2use = c("sexMale","scan_age")
-
-  # run linear model
-  mod2use = lm(formula = form2use, data = fs_data)
-
-  # run an ANOVA
-  res2use = anova(mod2use)
-
-  # grab ANOVA results and store into output_res
-  output_res[y_var, "Fstat"] = res2use["Group", "F value"]
-  output_res[y_var, "pval"] = res2use["Group", "Pr(>F)"]
-
-  # compute partial eta-squared as the effect size of the interaction effect
-  eta_sq_res = etasq(mod2use)
-  output_res[icol, "etasq"] = eta_sq_res["Group","Partial eta^2"]
-
-
-	# remove covariates before effect size computation
-	beta1 = mod2use$coefficients[covname2use, drop = FALSE]
-	beta1[is.na(beta1)] = 0
-
-	new_fs_data[,y_var] = as.numeric(t(fs_data[,y_var] - beta1 %*% t(full_model[,covname2use])))
-
-	# compute effect sizes
-	mask1 = fs_data$Group=="Good"
-	mask2 = fs_data$Group=="TD"
-	output_res[y_var, "es.TD_vs_Good"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-
-	d2use = subset(fs_data, mask1 | mask2)
-  mod2use = lm(formula = form2use, data = d2use)
-  res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Good"] = res$coefficients[2,"t value"]
-	output_res[y_var, "pval.TD_vs_Good"] = res$coefficients[2,"Pr(>|t|)"]
-
-	mask1 = fs_data$Group=="Poor"
-	mask2 = fs_data$Group=="TD"
-	output_res[y_var, "es.TD_vs_Poor"] = cohens_d(new_fs_data[mask2,y_var], new_fs_data[mask1,y_var])
-
-	d2use = subset(fs_data, mask1 | mask2)
-  mod2use = lm(formula = form2use, data = d2use)
-  res = summary(mod2use)
-	output_res[y_var, "tstat.TD_vs_Poor"] = res$coefficients[2,"t value"]
-	output_res[y_var, "pval.TD_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
-
-
-	mask1 = fs_data$Group=="Good"
-	mask2 = fs_data$Group=="Poor"
-	output_res[y_var, "es.Good_vs_Poor"] = cohens_d(new_fs_data[mask1,y_var], new_fs_data[mask2,y_var])
-
-	d2use = subset(fs_data, mask1 | mask2)
-  mod2use = lm(formula = form2use, data = d2use)
-  res = summary(mod2use)
-	output_res[y_var, "tstat.Good_vs_Poor"] = res$coefficients[2,"t value"]
-	output_res[y_var, "pval.Good_vs_Poor"] = res$coefficients[2,"Pr(>|t|)"]
-
-}
-
-output_res$fdrq = p.adjust(output_res$pval, method = "fdr")
-output_res$fdrq.TD_vs_Good = p.adjust(output_res$pval.TD_vs_Good, method = "fdr")
-output_res$fdrq.TD_vs_Poor = p.adjust(output_res$pval.TD_vs_Poor, method = "fdr")
-output_res$fdrq.Good_vs_Poor = p.adjust(output_res$pval.Good_vs_Poor, method = "fdr")
-output_res[order(output_res$pval),]
-```
-
 
 
 <!-- ```{r, warning=FALSE, message=FALSE} -->
@@ -1326,3 +1957,4 @@ output_res[order(output_res$pval),]
 <!-- pf -->
 
 <!-- ``` -->
+
