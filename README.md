@@ -2,7 +2,7 @@
 
 This repository has all the code for analyses conducted for:
 
-`Lombardo, M. V., Eyler, L., Pramparo, T., Gazestani, V. H., Hagler, D. J., Chen, C.-H., Dale, A. M., Seidlitz, J., Bethlehem, R. A. I., Bertelsen, N., Carter Barnes, C., Lopez, L., Lewis, N. E., Pierce, K., & Courchesne, E. Atypical genomic patterning of the cerebral cortex in autism with poor early language outcome. bioRxiv. doi:10.1101/2020.08.18.253443.`
+`Lombardo, M. V., Eyler, L., Pramparo, T., Gazestani, V. H., Hagler, D. J., Chen, C.-H., Dale, A. M., Seidlitz, J., Bethlehem, R. A. I., Bertelsen, N., Carter Barnes, C., Lopez, L., Lewis, N. E., Pierce, K., & Courchesne, E. Atypical genomic cortical patterning in autism with poor early language outcome. bioRxiv. doi:10.1101/2020.08.18.253443.`
 
 
 ## Requirements
